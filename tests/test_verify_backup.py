@@ -103,9 +103,11 @@ def test_verify_backup_rejects_postgres_archive_without_pg_restore(
     backup = tmp_path / "state.dump"
     backup.write_bytes(b"PGDMP\x01\x0f\x00fixture")
 
-    with patch("scripts.verify_backup.shutil.which", return_value=None):
-        with pytest.raises(ValueError, match="pg_restore is required"):
-            verify_backup(backup, _sha256(backup))
+    with (
+        patch("scripts.verify_backup.shutil.which", return_value=None),
+        pytest.raises(ValueError, match="pg_restore is required"),
+    ):
+        verify_backup(backup, _sha256(backup))
 
 
 def test_verify_backup_rejects_postgres_archive_rejected_by_pg_restore(
@@ -123,9 +125,9 @@ def test_verify_backup_rejects_postgres_archive_rejected_by_pg_restore(
     with (
         patch("scripts.verify_backup.shutil.which", return_value="/usr/bin/pg_restore"),
         patch("scripts.verify_backup.subprocess.run", return_value=rejected),
+        pytest.raises(ValueError, match="pg_restore rejected"),
     ):
-        with pytest.raises(ValueError, match="pg_restore rejected"):
-            verify_backup(backup, _sha256(backup))
+        verify_backup(backup, _sha256(backup))
 
 
 def test_verify_backup_rejects_explicit_format_mismatch(tmp_path: Path) -> None:
