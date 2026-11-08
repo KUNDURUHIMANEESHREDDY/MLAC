@@ -151,7 +151,13 @@ def create_app(
     auth_configured = bool(jwks_client is not None and configured_issuer and configured_audience)
     rate_limiter = _PrincipalRateLimiter(limit=rate_limit, window_seconds=rate_window_seconds)
     bearer = HTTPBearer(auto_error=False)
-    app = FastAPI(title="MLAC", version="0.8.0")
+    app = FastAPI(
+        title="MLAC",
+        version="0.8.0",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.add_middleware(RequestBodyLimitMiddleware, max_bytes=max_body_bytes)
     app.state.auth_configured = auth_configured
     app.state.storage_mode = "process-local"
