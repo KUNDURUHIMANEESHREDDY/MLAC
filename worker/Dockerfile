@@ -11,6 +11,7 @@ COPY src/mlac/ir.py /opt/mlac-worker/lib/mlac/ir.py
 COPY src/mlac/registry.py /opt/mlac-worker/lib/mlac/registry.py
 COPY src/mlac/transformer.py /opt/mlac-worker/lib/mlac/transformer.py
 COPY src/mlac/modification.py /opt/mlac-worker/lib/mlac/modification.py
+COPY src/mlac/weight_engine.py /opt/mlac-worker/lib/mlac/weight_engine.py
 COPY src/mlac/attestation.py /opt/mlac-worker/lib/mlac/attestation.py
 COPY src/mlac/lm_evaluation.py /opt/mlac-worker/lib/mlac/lm_evaluation.py
 COPY worker/evaluate /opt/mlac-worker/evaluate
