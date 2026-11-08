@@ -16,6 +16,9 @@ def test_head_pruning_migrates_weights_and_preserves_shape():
     assert result.parameters_after < result.parameters_before
     assert result.module(x).shape == model(x).shape
     assert model.attention.num_heads == 4
+    second = prune_attention_heads(result.module, [1])
+    assert second.module.attention.num_heads == 2
+    assert second.module(x).shape == x.shape
 
 
 def test_pruning_rejects_invalid_head_sets():
