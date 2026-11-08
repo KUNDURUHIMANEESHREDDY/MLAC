@@ -213,7 +213,7 @@ def _state_digest(state: Mapping[str, Tensor]) -> str:
         digest.update(name.encode("utf-8"))
         digest.update(str(value.dtype).encode("ascii"))
         digest.update(str(tuple(value.shape)).encode("ascii"))
-        digest.update(value.view(torch.uint8).numpy().tobytes())
+        digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
     return digest.hexdigest()
 
 
@@ -309,7 +309,6 @@ class TrainingEngine:
             for parameter in teacher_copy.parameters():
                 parameter.requires_grad_(False)
 
-        steps_per_epoch = math.ceil(dataset.train.inputs.shape[0] / config.batch_size)
         if config.scheduler == "cosine":
             scheduler = lambda optimizer: torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
         elif config.scheduler == "step":
@@ -327,7 +326,7 @@ class TrainingEngine:
             torch.use_deterministic_algorithms(True)
             with torch.random.fork_rng(devices=[]):
                 torch.manual_seed(config.seed)
-                        generator = torch.Generator(device="cpu").manual_seed(config.seed)
+                generator = torch.Generator(device="cpu").manual_seed(config.seed)
                 for epoch in range(1, config.epochs + 1):
                     candidate.train()
                     order = torch.randperm(dataset.train.inputs.shape[0], generator=generator)
