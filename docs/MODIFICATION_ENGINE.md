@@ -76,3 +76,15 @@ Laboratory, task-specific validation, and usually retraining or distillation.
 The current v1 engine is for trusted, already-instantiated PyTorch modules;
 it does not load checkpoints, execute generated code, modify arbitrary
 third-party model classes, or deploy candidates.
+
+
+## Candidate pipeline integration
+
+The Master Intelligence workflow can build these supported single-block
+TransformerBlock candidates from operator-controlled baseline checkpoints.
+It writes `candidate.pt` and a bounded `candidate_manifest.json`; the fixed
+worker independently validates the manifest, reconstructs the candidate from
+the trusted baseline using the same allow-listed operation, and strictly loads
+the candidate state dictionary before evaluation. Both files are included in
+the worker's signed input digest. The workflow does not yet expose Sequential
+layer-stack insertion/removal through the fixed single-block worker contract.
