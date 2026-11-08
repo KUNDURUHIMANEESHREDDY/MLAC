@@ -2,7 +2,9 @@
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from uuid import uuid4
+
 from mlac.governance import GovernancePolicy
+
 
 @dataclass(frozen=True)
 class EvolutionProposal:
@@ -14,16 +16,25 @@ class EvolutionProposal:
     status: str = "proposed"
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
+
 class EvolutionController:
-    def __init__(self, policy=None):
+    def __init__(self, policy=None, state_store=None):
         self.policy = policy or GovernancePolicy()
         self._proposals = []
+        self._state_store = state_store
+
     def propose(self, model_id, architecture, *, hypothesis, operation, parameters=None):
         self.policy.authorize(target="candidate", operation=operation)
         if not hypothesis.strip():
             raise ValueError("A testable hypothesis is required")
         proposal = EvolutionProposal(str(uuid4()), model_id, hypothesis, operation, parameters or {})
-        self._proposals.append(proposal)
+        if self._state_store is None:
+            self._proposals.append(proposal)
+        else:
+            self._state_store.insert_proposal(proposal)
         return proposal
+
     def list_proposals(self):
-        return [asdict(x) for x in self._proposals]
+        if self._state_store is not None:
+            return self._state_store.list_proposals()
+        return [asdict(item) for item in self._proposals]
