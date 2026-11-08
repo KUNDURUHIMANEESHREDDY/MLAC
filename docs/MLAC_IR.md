@@ -21,8 +21,10 @@ Transformers dependency.
 | Runtime contract | `RuntimeRequirements`, `RuntimeCapabilities` | Compare declared needs against an available execution target |
 | Weight migration | `WeightTransformationRequirement` | Declare source/target parameters and required transformations |
 
-The schema is intentionally descriptive. It does not execute graph nodes,
-initialize weights, load checkpoints, or perform tensor transformations.
+The IR remains framework-neutral, while optional PyTorch adapters make a
+validated subset executable. The compiler turns acyclic dataflow graphs into
+PyTorch modules, and the weight-transformation executor applies declared
+parameter migrations with shape checks and transactional semantics.
 
 ## Example
 
@@ -98,6 +100,85 @@ assert validate_compatibility(architecture, runtime) == ()
 - A missing runtime measurement does not count as satisfying a minimum memory
   or maximum sequence-length requirement.
 
+## Graph compiler
+
+Install the optional dependency with `pip install mlac[torch]`. The compiler
+entry point is `mlac.compiler.compile_architecture(architecture)`; it validates
+the IR and compiles a directed acyclic graph into a `torch.nn.Module`.
+
+Built-in operators:
+
+| Operator | Node attributes |
+|---|---|
+| `input` | Optional `input_index`; graph input placeholder |
+| `identity`, `relu`, `gelu`, `silu`, `tanh`, `sigmoid` | None |
+| `linear` | `in_features`, `out_features`, optional `bias` |
+| `layer_norm` | `normalized_shape`, optional `eps`, `elementwise_affine` |
+| `dropout` | Optional `p` |
+| `embedding` | `num_embeddings`, `embedding_dim`, optional `padding_idx` |
+| `softmax` | Optional `dim` |
+| `add`, `multiply`, `matmul` | Two incoming edges |
+| `concat` | Two or more incoming edges; optional `dim` |
+| `flatten` | Optional `start_dim`, `end_dim` |
+| `reshape` | `shape` |
+| `transpose` | `dim0`, `dim1` |
+| `permute` | `dims` |
+
+A custom operator can be registered per compile call by passing a mapping of
+operator names to factories that accept node attributes and return
+`torch.nn.Module` instances. This is the extension point for model-family
+specific operations. Unknown operators fail closed. Cycles, dynamic control
+flow, and multi-output node ports are not supported by the v1 PyTorch compiler;
+the compiler supports arbitrary *acyclic compositions of registered operators*,
+not every possible computation graph.
+
+A node can bind module parameters to canonical IR parameter names through
+`attributes.parameter_bindings`. For example,
+`{"weight": "encoder.proj.weight", "bias": "encoder.proj.bias"}`.
+Each canonical name must have a `ParameterMapping`. Checkpoint loading then
+uses `checkpoint_key` (or the canonical name when absent), verifies tensor
+shapes, and copies tensors into the compiled module. Strict loading rejects
+missing and unexpected checkpoint keys.
+
+Example:
+
+```python
+from mlac.compiler import compile_architecture
+
+compiled = compile_architecture(architecture)
+output = compiled(input_tensor)
+report = compiled.load_checkpoint(checkpoint_state_dict, strict=True)
+```
+
+## Weight transformation execution
+
+Install `mlac[torch]` and call
+`mlac.weight_transforms.apply_weight_transformations(architecture, parameters)`.
+The executor supports:
+
+- `identity` / `copy`
+- `transpose` / `t`
+- `permute`
+- `reshape`
+- `split` / `split_qkv` (explicit `sections` or `split_size`, plus optional `axis`)
+- `concat` / `concatenate`
+- `slice` (`axis`, `start`, `end`)
+- `squeeze` and `unsqueeze`
+
+Each transformation reads named source parameters and writes named target
+parameters. Target names must resolve through `ParameterMapping` to declared
+`TensorSpec` entries. Result rank and concrete dimensions are checked against
+the IR. The executor stages changes in a new mapping, clones generated tensors,
+and returns a report; it does not mutate the caller's input mapping. If any
+step fails, no partial result is returned. Operations execute in declaration
+order, so a later step may consume a target created by an earlier step.
+
+The executor transforms tensors supplied by the caller; it does not fetch
+checkpoints, write artifact storage, train models, or promote a candidate.
+Those responsibilities remain with the checkpoint, training, and governance
+services. The compiler and transformation executor are optional PyTorch
+adapters; the core IR module itself remains framework-independent.
+
 ## Serialization and versioning
 
 `Architecture.to_dict()` serializes the complete IR. `Architecture.from_dict()`
@@ -129,6 +210,8 @@ MLAC-IR v1 does not yet define a universal operator semantics catalogue,
 control-flow/loop semantics, sparse or sharded tensor layouts, quantization
 metadata beyond dtype labels, optimizer/training state, or a framework
 compiler. Adapters must declare unsupported features rather than guessing.
-Graph validation currently checks references, not acyclicity or numerical
-equivalence. Parameter mappings are declarations, not proof that checkpoint
-keys or tensor contents are correct.
+Graph validation checks references and rejects cycles for the v1 dataflow
+contract; it does not prove numerical equivalence. Parameter mappings are
+declarations until a checkpoint is loaded and verified against the compiled
+module's parameter shapes. The compiler's supported operator set is explicit
+and extensible, not a universal implementation of every framework operator.
