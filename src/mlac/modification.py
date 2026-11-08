@@ -25,6 +25,10 @@ _SUPPORTED_ACTIVATIONS = {
     "silu": nn.SiLU,
     "tanh": nn.Tanh,
 }
+_SHAPE_PRESERVING_TYPES = (
+    nn.Identity, nn.ReLU, nn.GELU, nn.SiLU, nn.Tanh, nn.Sigmoid,
+    nn.Dropout, nn.LayerNorm,
+)
 
 
 @dataclass(frozen=True)
@@ -171,6 +175,29 @@ def _linear_neighbors(layers: Sequence[nn.Module], index: int) -> tuple[nn.Linea
     return previous, following
 
 
+def _assert_linear_context_safe(layers: Sequence[nn.Module], index: int) -> None:
+    previous_index = next(
+        (i for i in range(index - 1, -1, -1) if isinstance(layers[i], nn.Linear)),
+        None,
+    )
+    following_index = next(
+        (i for i in range(index, len(layers)) if isinstance(layers[i], nn.Linear)),
+        None,
+    )
+    ranges = []
+    if previous_index is not None:
+        ranges.append(layers[previous_index + 1:index])
+    if following_index is not None:
+        ranges.append(layers[index:following_index])
+    if any(
+        not isinstance(layer, _SHAPE_PRESERVING_TYPES)
+        for segment in ranges for layer in segment
+    ):
+        raise ValueError(
+            "linear insertion/removal crosses a module whose shape contract is not known"
+        )
+
+
 def _resize_mlp_hidden(block: TransformerBlock, hidden_size: int) -> dict[str, Any]:
     if type(hidden_size) is not int or hidden_size < 1:
         raise ValueError("hidden_size must be a positive integer")
@@ -285,6 +312,7 @@ def _remove_layer(module: nn.Sequential, config: Mapping[str, Any]) -> dict[str,
         raise ValueError("cannot remove the only layer from a Sequential")
     removed = layers[index]
     if isinstance(removed, nn.Linear):
+        _assert_linear_context_safe(layers, index)
         previous, following = _linear_neighbors(layers, index)
         if previous is not None and following is not None and previous.out_features != following.in_features:
             raise ValueError(
@@ -295,6 +323,10 @@ def _remove_layer(module: nn.Sequential, config: Mapping[str, Any]) -> dict[str,
     if isinstance(removed, TransformerBlock):
         if any(not isinstance(layer, TransformerBlock) for layer in layers):
             raise TypeError("TransformerBlock removal requires a homogeneous transformer stack")
+    elif not isinstance(removed, (nn.Linear, *_SHAPE_PRESERVING_TYPES)):
+        raise TypeError(
+            f"remove_layer does not support shape-changing module {type(removed).__name__!r}"
+        )
     was_training = module.training
     layers.pop(index)
     module.__init__(*layers)
@@ -363,6 +395,7 @@ def _apply_one(module: nn.Module, item: Modification) -> dict[str, Any]:
         in_features, out_features = config["in_features"], config["out_features"]
         if type(in_features) is not int or type(out_features) is not int or in_features < 1 or out_features < 1:
             raise ValueError("linear dimensions must be positive")
+        _assert_linear_context_safe(layers, index)
         previous, following = _linear_neighbors(layers, index)
         if previous is not None and previous.out_features != in_features:
             raise ValueError("new Linear input does not match preceding Linear output")
