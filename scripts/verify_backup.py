@@ -67,12 +67,13 @@ def _verify_sqlite(path: Path, expected_identity: tuple[int, int]) -> None:
     """Run SQLite integrity checks without allowing writes or trusted schema code."""
     if _regular_file_identity(path) != expected_identity:
         raise ValueError("backup path changed before SQLite verification")
-    connection = sqlite3.connect(
-        path.resolve().as_uri() + "?mode=ro&immutable=1",
-        uri=True,
-        timeout=10,
-    )
+    connection: sqlite3.Connection | None = None
     try:
+        connection = sqlite3.connect(
+            path.resolve().as_uri() + "?mode=ro&immutable=1",
+            uri=True,
+            timeout=10,
+        )
         connection.execute("PRAGMA trusted_schema = OFF")
         connection.execute("PRAGMA query_only = ON")
         results = connection.execute("PRAGMA integrity_check").fetchall()
@@ -84,7 +85,8 @@ def _verify_sqlite(path: Path, expected_identity: tuple[int, int]) -> None:
     except sqlite3.DatabaseError as exc:
         raise ValueError(f"SQLite backup is not readable or structurally valid: {exc}") from exc
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
     if _regular_file_identity(path) != expected_identity:
         raise ValueError("backup path changed during SQLite verification")
 
