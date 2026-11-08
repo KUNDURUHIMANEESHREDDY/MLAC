@@ -8,6 +8,9 @@ from mlac.evaluation import EvaluationPolicy
 from mlac.experiments import ExperimentStore
 from mlac.governance import GovernancePolicy
 from mlac.pipeline import CandidateEvaluationPipeline, evaluate_worker_report
+from mlac.dataset_manifest import create_signed_dataset_manifest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives import serialization
 
 def bm(params, latency=1.0):
     return {"parameter_count":params,"latency_ms_per_iteration":latency,"iterations":10,
@@ -44,18 +47,26 @@ def dirs(tmp_path):
     candidate.mkdir(); trusted.mkdir(); identity.mkdir()
     (candidate/"candidate.pt").write_bytes(b"candidate checkpoint placeholder")
     (trusted/"manifest.json").write_text("operator-controlled")
+    (trusted/"evaluation.jsonl").write_text('{"text":"verified evaluation sample"}\\n', encoding="utf-8")
+    dataset_key=Ed25519PrivateKey.generate()
+    dataset_private=dataset_key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption())
+    dataset_public=dataset_key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo)
+    dataset_envelope=create_signed_dataset_manifest(trusted,dataset_id="pipeline-test",revision="1",
+        splits={"test":["evaluation.jsonl"]},signer_id="pipeline-test-signer",private_key_pem=dataset_private)
+    (trusted/"dataset-manifest.json").write_text(json.dumps(dataset_envelope),encoding="utf-8")
     key_id=generate_worker_keypair(identity/"worker_ed25519_private.pem",tmp_path/"worker-public.pem")
     public=(tmp_path/"worker-public.pem").read_bytes()
-    return candidate,trusted,identity,key_id,public
+    return candidate,trusted,identity,key_id,public,dataset_public
 
 def make_pipe(tmp_path, payload=None, *, policy=None, governance=None, tamper=False):
-    candidate,trusted,identity,key_id,public=dirs(tmp_path)
+    candidate,trusted,identity,key_id,public,dataset_public=dirs(tmp_path)
     runner=FakeRunner(payload or report())
     runner.tamper=tamper
     registry=ArtifactRegistry(tmp_path/"artifacts")
     pipe=CandidateEvaluationPipeline(runner=runner,image="registry.example/worker@sha256:"+"a"*64,
         store=ExperimentStore(tmp_path/"ledger.sqlite"),trusted_worker_keys={key_id:public},
-        worker_identity_dir=identity,artifact_registry=registry,evaluation_policy=policy,governance=governance)
+        worker_identity_dir=identity,artifact_registry=registry,evaluation_policy=policy,governance=governance,
+        trusted_dataset_signers={"pipeline-test-signer":dataset_public})
     return pipe,runner,candidate,trusted,registry
 
 def test_report_is_validated_and_scored():
@@ -83,6 +94,8 @@ def test_pipeline_verifies_worker_signature_and_records_artifacts(tmp_path):
     assert {r["role"] for r in records} >= {"worker-report.json","worker-attestation.json","candidate/candidate.pt","trusted/manifest.json"}
     for item in records: assert registry.get(item["sha256"])["sha256"]==item["sha256"]
     assert result.attestation["worker_id"]=="mlac-evaluator"
+    assert result.dataset_provenance["dataset_id"]=="pipeline-test"
+    assert result.to_dict()["dataset_provenance"]["manifest_sha256"]==result.dataset_provenance["manifest_sha256"]
 
 def test_pipeline_rejects_wrong_worker_image_attestation(tmp_path):
     pipe,runner,candidate,trusted,_=make_pipe(tmp_path,tamper=True)
@@ -103,11 +116,12 @@ def test_pipeline_does_not_authorize_quality_regression(tmp_path):
     assert result.status=="evaluation_failed" and not result.governance_authorized
 
 def test_pipeline_worker_entrypoint_is_trusted_configuration(tmp_path):
-    candidate,trusted,identity,key_id,public=dirs(tmp_path)
+    candidate,trusted,identity,key_id,public,dataset_public=dirs(tmp_path)
     with pytest.raises(ValueError,match="absolute trusted image path"):
         CandidateEvaluationPipeline(runner=FakeRunner(report()),image="worker@sha256:"+"a"*64,
             store=ExperimentStore(tmp_path/"ledger.sqlite"),trusted_worker_keys={key_id:public},
-            worker_identity_dir=identity,worker_entrypoint="candidate.py")
+            worker_identity_dir=identity,worker_entrypoint="candidate.py",
+            trusted_dataset_signers={"pipeline-test-signer":dataset_public})
 
 def test_pipeline_allows_parameter_reduction_under_growth_budget(tmp_path):
     pipe,runner,candidate,trusted,_=make_pipe(tmp_path,report(params=80))
@@ -178,3 +192,27 @@ def test_pipeline_uploads_artifacts_to_remote_store(tmp_path):
     assert remote.uploaded
     assert all("remote" in item for item in result.artifacts)
     assert all(item["remote"]["object_lock_mode"]=="COMPLIANCE" for item in result.artifacts)
+
+
+def test_pipeline_fails_closed_without_signed_dataset_manifest(tmp_path):
+    pipe,runner,candidate,trusted,_=make_pipe(tmp_path)
+    (trusted/"dataset-manifest.json").unlink()
+    with pytest.raises(PermissionError,match="signed dataset"):
+        pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="unsigned")
+    assert runner.command is None
+
+
+def test_pipeline_rejects_tampered_dataset_before_worker_execution(tmp_path):
+    pipe,runner,candidate,trusted,_=make_pipe(tmp_path)
+    (trusted/"evaluation.jsonl").write_text('{"text":"tampered"}\\n',encoding="utf-8")
+    with pytest.raises(PermissionError,match="integrity"):
+        pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="tampered-data")
+    assert runner.command is None
+
+
+def test_pipeline_rejects_untrusted_dataset_signer(tmp_path):
+    pipe,runner,candidate,trusted,_=make_pipe(tmp_path)
+    pipe.trusted_dataset_signers={}
+    with pytest.raises(PermissionError,match="not trusted"):
+        pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="untrusted")
+    assert runner.command is None
