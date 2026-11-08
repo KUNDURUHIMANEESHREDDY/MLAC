@@ -85,6 +85,7 @@ def test_transformer_stack_can_add_and_remove_layers():
     )
     assert len(result.module) == 2
     assert result.module(sample).shape == sample.shape
+    assert not result.module.training
     assert all(not layer.training for layer in result.module)
     assert len(stack) == 2
 
