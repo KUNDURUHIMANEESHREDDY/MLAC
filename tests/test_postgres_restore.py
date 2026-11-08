@@ -13,7 +13,10 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import pytest
 
 import scripts.restore_postgres_backup as restore_module
-from scripts.restore_postgres_backup import parse_postgres_target, restore_postgres_backup
+from scripts.restore_postgres_backup import (
+    parse_postgres_target,
+    restore_postgres_backup,
+)
 
 
 def test_restore_target_requires_dedicated_database_name() -> None:
@@ -58,7 +61,7 @@ def postgres_archive_and_target(tmp_path: Path):
     if not shutil.which("pg_dump") or not shutil.which("pg_restore"):
         pytest.skip("PostgreSQL client tools are not installed")
 
-    pytest.importorskip("psycopg")
+    psycopg = pytest.importorskip("psycopg")
     from psycopg import sql
 
     parsed = urlsplit(base_url)
@@ -89,15 +92,14 @@ def postgres_archive_and_target(tmp_path: Path):
         source = parse_postgres_target(source_url)
         connection = psycopg.connect(**source.connection_kwargs())
         try:
-            with connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        "CREATE TABLE restore_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
-                    )
-                    cursor.execute(
-                        "INSERT INTO restore_probe (id, value) VALUES (%s, %s)",
-                        (1, "preserved"),
-                    )
+            with connection, connection.cursor() as cursor:
+                cursor.execute(
+                    "CREATE TABLE restore_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                cursor.execute(
+                    "INSERT INTO restore_probe (id, value) VALUES (%s, %s)",
+                    (1, "preserved"),
+                )
         finally:
             connection.close()
 
@@ -137,6 +139,7 @@ def test_postgres_backup_restores_into_empty_disposable_database(
     postgres_archive_and_target,
 ) -> None:
     backup, digest, target_url, target_name = postgres_archive_and_target
+    psycopg = pytest.importorskip("psycopg")
 
     result = restore_postgres_backup(backup, target_url, digest)
 
@@ -164,13 +167,12 @@ def test_postgres_restore_refuses_nonempty_target_without_changing_it(
 
     connection = psycopg.connect(**target.connection_kwargs())
     try:
-        with connection:
-            with connection.cursor() as cursor:
-                cursor.execute("CREATE TABLE operator_owned (value TEXT NOT NULL)")
-                cursor.execute(
-                    "INSERT INTO operator_owned (value) VALUES (%s)",
-                    ("keep-this-row",),
-                )
+        with connection, connection.cursor() as cursor:
+            cursor.execute("CREATE TABLE operator_owned (value TEXT NOT NULL)")
+            cursor.execute(
+                "INSERT INTO operator_owned (value) VALUES (%s)",
+                ("keep-this-row",),
+            )
     finally:
         connection.close()
 
