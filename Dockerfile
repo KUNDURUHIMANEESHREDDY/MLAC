@@ -5,6 +5,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 RUN groupadd --system --gid 10001 mlac \
     && useradd --system --uid 10001 --gid mlac --home-dir /nonexistent mlac
 COPY pyproject.toml README.md LICENSE ./
