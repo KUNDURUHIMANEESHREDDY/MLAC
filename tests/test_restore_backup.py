@@ -173,6 +173,7 @@ def test_restore_syncs_file_and_parent_directory(
 
     restore_sqlite_backup(backup, destination, digest)
 
-    assert len(synced_modes) == 2
-    assert stat.S_ISREG(synced_modes[0])
-    assert stat.S_ISDIR(synced_modes[1])
+    assert len(synced_modes) == 3
+    assert stat.S_ISREG(synced_modes[0])  # stable source snapshot
+    assert stat.S_ISREG(synced_modes[1])  # restored destination file
+    assert stat.S_ISDIR(synced_modes[2])  # durable destination directory entry
