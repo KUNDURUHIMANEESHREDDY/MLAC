@@ -1,7 +1,7 @@
 """Master LLM Architecture Controller."""
 __version__ = "0.8.0"
 from mlac.ir import (
-    Architecture, CompatibilityConstraint, Component, GraphEdge as IRGraphEdge,
+    IR_SCHEMA_VERSION, Architecture, CompatibilityConstraint, Component, GraphEdge as IRGraphEdge,
     GraphNode as IRGraphNode, InitializationStrategy, ParameterMapping,
     RuntimeCapabilities, RuntimeRequirements, TensorSpec,
     WeightTransformationRequirement, validate_compatibility,
@@ -28,7 +28,7 @@ def apply_weight_transformations(*args, **kwargs):
 
 
 __all__ = [
-    "Architecture", "Component", "TensorSpec", "IRGraphNode", "IRGraphEdge",
+    "IR_SCHEMA_VERSION", "Architecture", "Component", "TensorSpec", "IRGraphNode", "IRGraphEdge",
     "GraphNode", "GraphEdge", "compile_architecture", "apply_weight_transformations",
     "ParameterMapping", "InitializationStrategy", "CompatibilityConstraint",
     "RuntimeRequirements", "RuntimeCapabilities", "WeightTransformationRequirement",
@@ -36,7 +36,6 @@ __all__ = [
     "MasterIntelligenceEngine", "IntelligenceReport", "OptimizationObjective",
     "OpenAIResponsesBackend", "OpenAIProviderError", "IntelligenceExperimentWorkflow",
     "IntelligenceWorkflowResult", "TorchTransformerCandidateBuilder", "__version__",
-    "ArchitectureInspection", "AttentionAnalysis", "GraphEdge", "GraphNode",
-    "KVCacheEstimate", "MemoryProfile", "estimate_kv_cache_bytes",
+    "ArchitectureInspection", "AttentionAnalysis", "KVCacheEstimate", "MemoryProfile", "estimate_kv_cache_bytes",
     "inspect_torch_model", "inspect_torch_model_full",
 ]
