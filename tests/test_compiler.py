@@ -126,9 +126,7 @@ def test_compiler_executes_declared_initialization_strategy():
             InitializationStrategy(
                 "proj.weight", "zeros"
             ),
-            __import__("mlac.ir", fromlist=["InitializationStrategy"]).InitializationStrategy(
-                "proj.bias", "constant", {"value": 0.25}
-            ),
+            InitializationStrategy("proj.bias", "constant", {"value": 0.25}),
         ),
     )
     model = compile_architecture(architecture)
