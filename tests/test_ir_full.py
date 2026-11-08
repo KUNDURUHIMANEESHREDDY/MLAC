@@ -117,6 +117,24 @@ def test_runtime_compatibility_checks_backend_features_dtype_and_memory():
     assert any("sequence length" in item for item in issues)
 
 
+def test_runtime_contract_preserves_legacy_positional_arguments_and_tensor_dtypes():
+    legacy = RuntimeRequirements("pytorch", ("bf16",), ("bf16",), 1024, 2048)
+    assert legacy.required_features == ("bf16",)
+    assert legacy.required_dtypes == ("bf16",)
+    assert legacy.required_devices == ()
+
+    architecture = Architecture(
+        name="dtype-contract",
+        family="mlp",
+        tensors=(TensorSpec("weight", (4, 4), "bf16"),),
+    )
+    issues = validate_compatibility(
+        architecture,
+        RuntimeCapabilities(backend="cpu", supported_dtypes=("fp32",)),
+    )
+    assert any("does not support dtypes" in item for item in issues)
+
+
 def test_compatibility_constraints_support_warnings():
     architecture = Architecture(
         name="cpu-model",
