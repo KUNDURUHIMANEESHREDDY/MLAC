@@ -7,7 +7,11 @@ import json
 import sys
 from typing import Any
 
-REQUIRED_CHECKS = ("pytest", "CodeQL", "Analyze (python)", "Analyze (actions)")
+# These are the checks GitHub emits for push-triggered main commits. The
+# repository-level CodeQL aggregate is not consistently present on push runs;
+# the two language analyses are the authoritative default-setup results.
+REQUIRED_CHECKS = ("pytest", "Analyze (python)", "Analyze (actions)")
+REQUIRED_CHECK_APP = "github-actions"
 
 
 def evaluate_check_runs(payload: Any, expected_sha: str) -> tuple[str, list[str]]:
@@ -24,9 +28,15 @@ def evaluate_check_runs(payload: Any, expected_sha: str) -> tuple[str, list[str]
     failed: list[str] = []
 
     for name in REQUIRED_CHECKS:
-        matches = [run for run in runs if run.get("name") == name]
+        matches = [
+            run
+            for run in runs
+            if run.get("name") == name
+            and isinstance(run.get("app"), dict)
+            and run["app"].get("slug") == REQUIRED_CHECK_APP
+        ]
         if not matches:
-            pending.append(f"{name}: missing")
+            pending.append(f"{name}: missing from {REQUIRED_CHECK_APP}")
             continue
 
         latest = max(
