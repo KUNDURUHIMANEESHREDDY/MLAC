@@ -128,7 +128,7 @@ def create_app(
     try:
         import jwt
         from fastapi import Depends, FastAPI, HTTPException
-        from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+        from fastapi.security import HTTPBearer
         from jwt import PyJWKClient
     except ImportError as exc:
         raise RuntimeError("Install API dependencies: pip install 'mlac[api]'") from exc
@@ -152,9 +152,7 @@ def create_app(
     app.state.auth_configured = auth_configured
     app.state.storage_mode = "process-local"
 
-    def require_principal(
-        credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
-    ) -> str:
+    def require_principal(credentials=Depends(bearer)) -> str:
         if not auth_configured:
             raise HTTPException(status_code=503, detail="OIDC authentication is not configured")
         if credentials is None or credentials.scheme.lower() != "bearer":
