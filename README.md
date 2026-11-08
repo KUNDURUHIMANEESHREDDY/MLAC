@@ -114,3 +114,25 @@ See docs/ARCHITECTURE.md and docs/PHASE4.md through docs/PHASE7.md.
 ## License
 
 Apache-2.0. See LICENSE.
+
+## Language-model evaluation
+
+MLAC now includes a fixed local-only causal-LM worker for held-out perplexity
+and multiple-choice reasoning accuracy. Install `pip install -e ".[dev,lm-eval]"`,
+build and digest-pin the worker image, and configure the existing
+`CandidateEvaluationPipeline` with
+`worker_entrypoint="/opt/mlac-worker/evaluate-lm"`. Candidate weights use
+safetensors; the operator-controlled trusted bundle supplies the matching model
+configuration, baseline weights, local tokenizer assets, and JSONL evaluation
+data. The pipeline validates and signs the worker report through its existing
+attestation, quality, governance, artifact, and ledger path.
+
+Choose `EvaluationPolicy(quality_metric="perplexity_score")` to gate on
+negative perplexity (higher is better), or
+`EvaluationPolicy(quality_metric="reasoning_accuracy")` to gate on
+multiple-choice accuracy. The worker reports both metrics when applicable.
+Multiple-choice likelihood accuracy is a narrow reasoning proxy, not a
+general-purpose reasoning benchmark. Dataset provenance, contamination
+controls, tokenizer consistency, and task-specific acceptance thresholds must
+be established by the operator. See `worker/README.md` for the manifest,
+dataset schema, and limits.
