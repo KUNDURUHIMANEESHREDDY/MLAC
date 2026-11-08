@@ -42,7 +42,11 @@ The library workflow connects a Master Intelligence plan to the existing control
     from mlac.sandbox import DockerSandboxRunner
     from mlac.experiments import ExperimentStore
     from mlac.artifact_registry import ArtifactRegistry
+    from pathlib import Path
 
+    trusted_dataset_signers = {
+        "dataset-release-prod": Path("/etc/mlac/trust/dataset-release-prod.pem").read_bytes(),
+    }
     image = "registry.example/mlac-worker@sha256:<64-hex-digest>"
     pipeline = CandidateEvaluationPipeline(
         runner=DockerSandboxRunner(image=image),
