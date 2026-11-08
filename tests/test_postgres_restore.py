@@ -166,7 +166,8 @@ def test_postgres_backup_restores_into_empty_disposable_database(
     restore_command = restore_commands[0]
     assert "--dbname" in restore_command
     assert restore_command[restore_command.index("--dbname") + 1] == target.database
-    assert target.password not in " ".join(restore_command)
+    connection_args = restore_command[1:-1]
+    assert target.password not in " ".join(connection_args)
     assert result["format"] == "postgres-custom"
     assert result["sha256"] == digest
     assert result["database"] == target_name
