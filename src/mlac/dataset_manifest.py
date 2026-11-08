@@ -139,8 +139,11 @@ def verify_signed_dataset_manifest(
         {"schema_version", "dataset_id", "revision", "created_at", "splits", "files", "dataset_fingerprint"},
     ):
         raise ValueError("dataset manifest schema is invalid")
-    if manifest["schema_version"] != 1:
+    if isinstance(manifest["schema_version"], bool) or manifest["schema_version"] != 1:
         raise ValueError("unsupported dataset manifest version")
+    for field in ("dataset_id", "revision", "created_at"):
+        if not isinstance(manifest[field], str) or not manifest[field].strip():
+            raise ValueError(f"dataset manifest {field} must be a non-empty string")
     if "dataset_fingerprint" in manifest and (not isinstance(manifest["dataset_fingerprint"], str)
             or not re.fullmatch(r"[0-9a-f]{64}", manifest["dataset_fingerprint"])):
         raise ValueError("dataset manifest fingerprint must be a lowercase SHA-256 digest")
@@ -170,6 +173,8 @@ def verify_signed_dataset_manifest(
         if not isinstance(paths, list) or not paths:
             raise ValueError("dataset split must contain at least one file")
         for relative in paths:
+            if not isinstance(relative, str) or not relative:
+                raise ValueError("dataset split paths must be non-empty strings")
             if relative in membership:
                 raise ValueError("dataset file appears in multiple splits")
             membership[relative] = split
