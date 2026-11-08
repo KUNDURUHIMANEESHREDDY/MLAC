@@ -333,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
             database_url,
             arguments.sha256,
         )
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError, TypeError, ImportError) as exc:
         detail = str(exc).replace(database_url, "[database URL redacted]") if database_url else str(exc)
         print(f"PostgreSQL restore drill failed: {detail}", file=sys.stderr)
         return 1
