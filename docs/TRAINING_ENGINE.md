@@ -71,11 +71,31 @@ from mlac.training_engine import (
     LoRATarget, TensorSplit, TrainingConfig, TrainingDataset, TrainingEngine,
 )
 
+from pathlib import Path
+from mlac.dataset_manifest import create_signed_dataset_manifest
+from mlac.training_engine import SignedDatasetBinding
+
+dataset_root = Path("./signed-training-data")  # contains train.jsonl, validation.jsonl, test.jsonl
 dataset = TrainingDataset(
     train=TensorSplit(train_x, train_y, train_ids),
     validation=TensorSplit(validation_x, validation_y, validation_ids),
     heldout=TensorSplit(heldout_x, heldout_y, heldout_ids),
     revision="dataset-v3",
+)
+manifest = create_signed_dataset_manifest(
+    dataset_root,
+    dataset_id="student-training-v3",
+    revision=dataset.revision,
+    splits={"train": ["train.jsonl"], "validation": ["validation.jsonl"], "test": ["test.jsonl"]},
+    signer_id="training-data-release",
+    private_key_pem=dataset_signing_private_key,
+    dataset_fingerprint=dataset.digest,
+)
+dataset = TrainingDataset(
+    dataset.train, dataset.validation, dataset.heldout, dataset.revision,
+    signed_manifest=SignedDatasetBinding(
+        dataset_root, manifest, {"training-data-release": dataset_signing_public_key},
+    ),
 )
 result = TrainingEngine().fit(
     model=student,
