@@ -8,9 +8,16 @@ EXPECTED_SHA = "a" * 40
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "publish-image.yml"
 
 
-def check(name: str, *, status: str = "completed", conclusion: str | None = "success",
-          sha: str = EXPECTED_SHA, started_at: str = "2026-11-08T00:00:00Z",
-          run_id: int = 1) -> dict:
+def check(
+    name: str,
+    *,
+    status: str = "completed",
+    conclusion: str | None = "success",
+    sha: str = EXPECTED_SHA,
+    started_at: str = "2026-11-08T00:00:00Z",
+    run_id: int = 1,
+    app_slug: str = "github-actions",
+) -> dict:
     """Build a GitHub check-run fixture."""
     return {
         "name": name,
@@ -19,6 +26,7 @@ def check(name: str, *, status: str = "completed", conclusion: str | None = "suc
         "conclusion": conclusion,
         "started_at": started_at,
         "id": run_id,
+        "app": {"slug": app_slug},
     }
 
 
@@ -27,13 +35,13 @@ def successful_checks() -> dict:
     return {"check_runs": [check(name) for name in REQUIRED_CHECKS]}
 
 
-def test_gate_requires_the_codeql_aggregate_and_both_language_analyses() -> None:
-    """The aggregate and both default-setup language analyses are required."""
-    assert REQUIRED_CHECKS == ("pytest", "CodeQL", "Analyze (python)", "Analyze (actions)")
+def test_gate_requires_push_compatible_default_codeql_analyses() -> None:
+    """Push publication requires pytest and both default-setup language analyses."""
+    assert REQUIRED_CHECKS == ("pytest", "Analyze (python)", "Analyze (actions)")
 
 
-def test_gate_accepts_only_complete_successful_required_checks_for_exact_sha() -> None:
-    """All required check runs must succeed on the requested commit."""
+def test_gate_accepts_complete_successful_required_checks_without_pr_only_aggregate() -> None:
+    """The push gate succeeds on the checks actually emitted for main commits."""
     assert evaluate_check_runs(successful_checks(), EXPECTED_SHA) == ("success", [])
 
 
@@ -43,7 +51,9 @@ def test_gate_waits_when_a_required_check_is_missing_or_in_progress() -> None:
     assert evaluate_check_runs(missing, EXPECTED_SHA)[0] == "pending"
 
     pending = successful_checks()
-    pending["check_runs"][-1] = check(REQUIRED_CHECKS[-1], status="in_progress", conclusion=None)
+    pending["check_runs"][-1] = check(
+        REQUIRED_CHECKS[-1], status="in_progress", conclusion=None
+    )
     assert evaluate_check_runs(pending, EXPECTED_SHA)[0] == "pending"
 
 
@@ -64,13 +74,26 @@ def test_gate_ignores_successful_checks_from_another_commit() -> None:
     assert evaluate_check_runs(payload, EXPECTED_SHA)[0] == "pending"
 
 
+def test_gate_rejects_same_named_checks_from_an_untrusted_app() -> None:
+    """A third-party check with a matching name cannot satisfy the gate."""
+    payload = successful_checks()
+    payload["check_runs"][0] = check(REQUIRED_CHECKS[0], app_slug="untrusted-app")
+    assert evaluate_check_runs(payload, EXPECTED_SHA)[0] == "pending"
+
+
 def test_latest_rerun_controls_the_required_check_result() -> None:
     """An older successful attempt cannot hide a newer failed attempt."""
     payload = successful_checks()
-    payload["check_runs"].extend([
-        check(REQUIRED_CHECKS[0], conclusion="failure",
-              started_at="2026-11-08T00:01:00Z", run_id=2),
-    ])
+    payload["check_runs"].extend(
+        [
+            check(
+                REQUIRED_CHECKS[0],
+                conclusion="failure",
+                started_at="2026-11-08T00:01:00Z",
+                run_id=2,
+            ),
+        ]
+    )
     assert evaluate_check_runs(payload, EXPECTED_SHA)[0] == "failure"
 
 
@@ -88,6 +111,7 @@ def test_publisher_serializes_main_and_skips_superseded_main_tags() -> None:
     assert "commits/main" in source
     assert 'if [[ "$current_sha" == "$EXPECTED_SHA" ]]' in source
     assert 'if [[ "$IS_MAIN_TIP" == "true" ]]' in source
-    assert '${IMAGE_NAME}:sha-${EXPECTED_SHA}' in source
+    assert "${IMAGE_NAME}:sha-${EXPECTED_SHA}" in source
     assert "tags: ${{ steps.tags.outputs.tags }}" in source
     assert "mlac-container-${{ github.event.workflow_run.head_sha }}" not in source
+}
