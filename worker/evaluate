@@ -130,6 +130,8 @@ def load_candidate(config: dict, baseline_path: Path, candidate_path: Path, mani
             "mlp.0.weight", "mlp.0.bias", "mlp.2.weight", "mlp.2.bias",
         }
         module_targets = {"attention.qkv", "attention.out_proj", "mlp.0", "mlp.2"}
+        if not isinstance(target, str):
+            raise ValueError("weight operation target must be a string")
         if operation == "prune_unstructured":
             amount = params.get("amount")
             if set(params) != {"target", "amount"} or target not in parameter_targets:
@@ -147,7 +149,7 @@ def load_candidate(config: dict, baseline_path: Path, candidate_path: Path, mani
                 "attention.qkv.weight", "attention.out_proj.weight", "mlp.0.weight", "mlp.2.weight"
             }:
                 raise ValueError("prune_structured manifest target/fields are invalid")
-            if dimension not in {"input", "output"} or not isinstance(indices, list) or not indices:
+            if not isinstance(dimension, str) or dimension not in {"input", "output"} or not isinstance(indices, list) or not indices:
                 raise ValueError("prune_structured dimension/indices are invalid")
             if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in indices) or len(set(indices)) != len(indices):
                 raise ValueError("prune_structured indices must be unique non-negative integers")
