@@ -342,7 +342,7 @@ def create_app(
     app.add_middleware(PreAuthenticationRateLimitMiddleware, rate_limiter=peer_rate_limiter)
     app.state.auth_configured = auth_configured
     if isinstance(state_store, PostgresStateStore):
-        app.add_event_handler("shutdown", state_store.close)
+        app.router.add_event_handler("shutdown", state_store.close)
     app.state.storage_mode = (
         "postgres"
         if isinstance(state_store, PostgresStateStore)
