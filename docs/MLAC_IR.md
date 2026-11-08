@@ -151,7 +151,9 @@ A node can bind module parameters to canonical IR parameter names through
 Each canonical name must have a `ParameterMapping`. Checkpoint loading then
 uses `checkpoint_key` (or the canonical name when absent), verifies tensor
 shapes, and copies tensors into the compiled module. Strict loading rejects
-missing and unexpected checkpoint keys.
+missing and unexpected checkpoint keys. The mapping's `transform` field is an
+adapter hint; executable multi-parameter migrations must be declared as
+`WeightTransformationRequirement` entries.
 
 Executable compiler example:
 
