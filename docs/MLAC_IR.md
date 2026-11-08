@@ -132,6 +132,12 @@ flow, and multi-output node ports are not supported by the v1 PyTorch compiler;
 the compiler supports arbitrary *acyclic compositions of registered operators*,
 not every possible computation graph.
 
+Declared `InitializationStrategy` entries are applied during compilation to
+parameters mapped to the target tensor. Built-in methods include zeros, ones,
+constant, normal, uniform, Xavier uniform/normal, Kaiming uniform/normal, and
+orthogonal initialization. Optional seeds are isolated from the caller's RNG
+state.
+
 A node can bind module parameters to canonical IR parameter names through
 `attributes.parameter_bindings`. For example,
 `{"weight": "encoder.proj.weight", "bias": "encoder.proj.bias"}`.
