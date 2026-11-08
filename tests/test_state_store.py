@@ -4,7 +4,7 @@ import sqlite3
 import pytest
 
 from mlac.evolution import EvolutionController
-from mlac.ir import Architecture, Component
+from mlac.ir import Architecture, Component, RuntimeRequirements
 from mlac.registry import ModelRegistry
 from mlac.sqlite_state import SQLiteStateStore
 
@@ -91,3 +91,18 @@ def test_future_schema_version_fails_closed(tmp_path):
 def test_store_rejects_non_file_backed_or_relative_paths(path):
     with pytest.raises(ValueError):
         SQLiteStateStore(path)
+
+
+def test_architecture_round_trip_normalizes_runtime_requirement_sequences():
+    """Preserve tuple-valued IR contracts when JSON converts sequences to lists."""
+    original = Architecture(
+        "tiny",
+        "mlp",
+        runtime_requirements=RuntimeRequirements(
+            required_features=("cuda",),
+            required_dtypes=("float16",),
+            required_devices=("gpu",),
+        ),
+    )
+
+    assert Architecture.from_dict(original.to_dict()) == original
