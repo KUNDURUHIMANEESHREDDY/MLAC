@@ -24,10 +24,6 @@ intelligence = MasterIntelligenceEngine()
 _MAX_REQUEST_BODY_BYTES = 1_048_576
 
 
-class _BodyTooLarge(Exception):
-    """Raised when a streamed request exceeds the configured body limit."""
-
-
 class RequestBodyLimitMiddleware:
     """Reject oversized request bodies before JSON parsing buffers them."""
 
@@ -39,7 +35,7 @@ class RequestBodyLimitMiddleware:
         self.max_bytes = max_bytes
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
-        """Count streamed body bytes and reject oversized HTTP requests."""
+        """Buffer at most the configured limit, then replay the bounded body."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -56,22 +52,31 @@ class RequestBodyLimitMiddleware:
                 await self._reject(send)
                 return
 
-        received = 0
-
-        async def limited_receive() -> dict:
-            """Count each ASGI body chunk before passing it downstream."""
-            nonlocal received
+        body = bytearray()
+        while True:
             message = await receive()
-            if message["type"] == "http.request":
-                received += len(message.get("body", b""))
-                if received > self.max_bytes:
-                    raise _BodyTooLarge
-            return message
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            body.extend(message.get("body", b""))
+            if len(body) > self.max_bytes:
+                await self._reject(send)
+                return
+            if not message.get("more_body", False):
+                break
 
-        try:
-            await self.app(scope, limited_receive, send)
-        except _BodyTooLarge:
-            await self._reject(send)
+        replayed = False
+
+        async def replay_receive() -> dict:
+            """Replay the already-bounded request body exactly once."""
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
 
     @staticmethod
     async def _reject(send: Any) -> None:
