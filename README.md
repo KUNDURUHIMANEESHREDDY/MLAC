@@ -34,6 +34,10 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 
 Optional API: install `pip install -e ".[api]"` and configure `MLAC_API_JWKS_URL`, `MLAC_API_ISSUER`, and `MLAC_API_AUDIENCE` from a trusted OIDC provider before running `mlac serve`. Every non-health route requires a signed bearer JWT with issuer, audience, subject, issued-at, and expiry claims. The API verifies signing keys through the configured JWKS endpoint and scopes models/proposals to the issuer plus subject. Set `MLAC_API_STATE_DB` to an absolute local file path to persist model/proposal metadata across restarts; otherwise state remains process-local. Missing identity configuration fails closed with HTTP 503. See `docs/API_STATE.md` for storage semantics and backup guidance.
 
+## Production-candidate deployment
+
+The supported single-instance API topology uses the pinned GHCR image, Caddy-managed HTTPS, a persistent local SQLite metadata volume, and internal Redis-backed shared rate limiting. Configure OIDC, domain, image digest, and backup bucket before startup. Follow [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md) and review [docs/RELEASE_1_0_0.md](docs/RELEASE_1_0_0.md). This topology is not HA and is not considered production-deployed until the target-host acceptance checklist and restore drill pass.
+
 ## Master Intelligence planning
 
 The proposal-only planning engine works without a model-provider API:
