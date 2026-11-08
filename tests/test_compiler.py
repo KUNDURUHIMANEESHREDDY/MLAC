@@ -3,7 +3,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from mlac.compiler import compile_architecture
-from mlac.ir import Architecture, GraphEdge, GraphNode, ParameterMapping, TensorSpec
+from mlac.ir import Architecture, GraphEdge, GraphNode, InitializationStrategy, ParameterMapping, TensorSpec
 
 
 def test_compile_linear_relu_graph_and_load_checkpoint():
@@ -123,7 +123,7 @@ def test_compiler_executes_declared_initialization_strategy():
             ParameterMapping("proj.bias", "proj.bias", shape=(2,)),
         ),
         initialization=(
-            __import__("mlac.ir", fromlist=["InitializationStrategy"]).InitializationStrategy(
+            InitializationStrategy(
                 "proj.weight", "zeros"
             ),
             __import__("mlac.ir", fromlist=["InitializationStrategy"]).InitializationStrategy(
