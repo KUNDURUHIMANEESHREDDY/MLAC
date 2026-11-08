@@ -367,7 +367,7 @@ class MasterIntelligenceEngine:
             allowed_targets = {"attention.qkv.weight", "attention.out_proj.weight", "mlp.0.weight", "mlp.2.weight"}
             if not isinstance(target, str) or target not in allowed_targets:
                 raise ValueError(f"proposal {index}: structured-pruning target is not allowlisted")
-            if dimension not in {"input", "output"} or not isinstance(indices, list) or not indices:
+            if not isinstance(dimension, str) or dimension not in {"input", "output"} or not isinstance(indices, list) or not indices:
                 raise ValueError(f"proposal {index}: structured pruning requires input/output dimension and non-empty indices")
             if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in indices) or len(set(indices)) != len(indices):
                 raise ValueError(f"proposal {index}: structured pruning indices must be unique non-negative integers")
