@@ -347,15 +347,15 @@ class TrainingEngine:
             for parameter in teacher_copy.parameters():
                 parameter.requires_grad_(False)
 
-        if config.scheduler == "cosine":
-            scheduler = lambda optimizer: torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
-        elif config.scheduler == "step":
-            scheduler = lambda optimizer: torch.optim.lr_scheduler.StepLR(optimizer, step_size=config.step_size, gamma=config.scheduler_gamma)
-        else:
-            scheduler = lambda optimizer: None
-
         optimizer = torch.optim.AdamW(trainable, lr=config.learning_rate, weight_decay=config.weight_decay)
-        lr_scheduler = scheduler(optimizer)
+        if config.scheduler == "cosine":
+            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
+        elif config.scheduler == "step":
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer, step_size=config.step_size, gamma=config.scheduler_gamma,
+            )
+        else:
+            lr_scheduler = None
         history: list[EpochMetrics] = []
         best_loss, best_epoch, stale = float("inf"), 0, 0
         best_state: dict[str, Tensor] | None = None
