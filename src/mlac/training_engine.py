@@ -76,6 +76,8 @@ class TrainingDataset:
         feature_shape = tuple(self.train.inputs.shape[1:])
         if any(tuple(split.inputs.shape[1:]) != feature_shape for split in (self.validation, self.heldout)):
             raise ValueError("all dataset splits must have identical input feature shapes")
+        if any(split.inputs.dtype != self.train.inputs.dtype for split in (self.validation, self.heldout)):
+            raise ValueError("all dataset splits must use the same input dtype")
 
     @property
     def digest(self) -> str:
@@ -280,25 +282,27 @@ class TrainingEngine:
         if dataset.train.labels is None or dataset.validation.labels is None or dataset.heldout.labels is None:
             raise ValueError("labels are required for all splits")
 
-        candidate = deepcopy(model).cpu()
-        teacher_copy = deepcopy(teacher).cpu().eval() if teacher is not None else None
-        target_names: list[str] = []
-        if mode == "lora":
-            steps = []
-            for target in lora_targets:
-                if not isinstance(target, LoRATarget) or not re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*", target.module):
-                    raise ValueError("LoRA targets must be explicit dotted module paths")
-                steps.append(WeightOptimizationStep("inject_lora", target.module, {
-                    "rank": target.rank, "alpha": target.alpha, "dropout": target.dropout,
-                }))
-                target_names.append(target.module)
-            candidate = optimize_weights(candidate, WeightOptimizationPlan(tuple(steps))).model
-            for parameter in candidate.parameters():
-                parameter.requires_grad_(False)
-            for module in candidate.modules():
-                if hasattr(module, "lora_A") and hasattr(module, "lora_B"):
-                    module.lora_A.requires_grad_(True)
-                    module.lora_B.requires_grad_(True)
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(config.seed)
+            candidate = deepcopy(model).cpu()
+            teacher_copy = deepcopy(teacher).cpu().eval() if teacher is not None else None
+            target_names: list[str] = []
+            if mode == "lora":
+                steps = []
+                for target in lora_targets:
+                    if not isinstance(target, LoRATarget) or not re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*", target.module):
+                        raise ValueError("LoRA targets must be explicit dotted module paths")
+                    steps.append(WeightOptimizationStep("inject_lora", target.module, {
+                        "rank": target.rank, "alpha": target.alpha, "dropout": target.dropout,
+                    }))
+                    target_names.append(target.module)
+                candidate = optimize_weights(candidate, WeightOptimizationPlan(tuple(steps))).model
+                for parameter in candidate.parameters():
+                    parameter.requires_grad_(False)
+                for module in candidate.modules():
+                    if hasattr(module, "lora_A") and hasattr(module, "lora_B"):
+                        module.lora_A.requires_grad_(True)
+                        module.lora_B.requires_grad_(True)
 
         trainable = [parameter for parameter in candidate.parameters() if parameter.requires_grad]
         if not trainable:
