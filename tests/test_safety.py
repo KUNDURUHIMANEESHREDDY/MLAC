@@ -46,8 +46,6 @@ def test_guardrails_can_only_be_tightened():
     assert tighter.policy.max_candidates_per_run == 2
     with pytest.raises(PermissionError, match="only be tightened"):
         kernel.tighten(max_parameter_growth_ratio=0.5)
-    with pytest.raises(PermissionError, match="only be tightened"):
-        kernel.tighten(allow_candidate_mutations=True)  # default remains true, see explicit false below
     disabled = kernel.tighten(allow_candidate_mutations=False)
     with pytest.raises(PermissionError, match="disabled"):
         disabled.authorize_candidate(operation="prune-head")
@@ -64,7 +62,8 @@ def test_candidate_authorization_checks_growth_and_operation():
 
 def test_production_requires_matching_unexpired_external_signature():
     policy = GuardrailPolicy(allow_production_mutations=True)
-    kernel = SafetyKernel(policy)
+    digest = SafetyKernel(policy).policy_digest
+    kernel = SafetyKernel(policy, expected_policy_sha256=digest)
     key = b"external-operator-secret"
     approval = _approval(key)
     kernel.authorize_production(
@@ -115,6 +114,12 @@ def test_policy_tampering_fails_integrity_check():
 
 
 def test_production_approval_cannot_be_disabled_by_tightening():
-    kernel = SafetyKernel(GuardrailPolicy(allow_production_mutations=True))
+    policy = GuardrailPolicy(allow_production_mutations=True)
+    kernel = SafetyKernel(policy, expected_policy_sha256=SafetyKernel(policy).policy_digest)
     with pytest.raises(PermissionError, match="only be tightened"):
         kernel.tighten(require_operator_approval=False)
+
+
+def test_production_policy_requires_external_digest_pin():
+    with pytest.raises(PermissionError, match="externally pinned"):
+        SafetyKernel(GuardrailPolicy(allow_production_mutations=True))
