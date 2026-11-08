@@ -398,7 +398,7 @@ def create_app(
 
     @app.get("/ready")
     def ready() -> dict[str, str]:
-        """Report local API readiness without implying production readiness."""
+        """Report authenticated API and configured backend readiness."""
         if not auth_configured:
             raise HTTPException(status_code=503, detail="OIDC authentication is not configured")
         if state_store is not None:
