@@ -88,7 +88,7 @@ def test_health_is_liveness_and_non_health_routes_require_bearer():
     """Keep liveness public while requiring identity for application routes."""
     client, _ = make_client()
     assert client.get("/health").status_code == 200
-    assert client.get("/ready").json()["scope"] == "localhost-development"
+    assert client.get("/ready").json()["scope"] == "api-runtime"
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404
     response = client.get("/models")
