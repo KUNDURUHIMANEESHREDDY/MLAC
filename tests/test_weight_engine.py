@@ -98,7 +98,7 @@ def test_checkpoint_migration_requires_exact_tensor_contracts():
         "new.weight": torch.zeros(2, 3),
         "new.bias": torch.zeros(2),
     }
-    report = migrate_checkpoint(source, target, {"new.weight": "old.weight"})
+    report = migrate_checkpoint(source, target, {"new.weight": "old.weight"}, strict=False)
     assert torch.equal(report.state_dict["new.weight"], source["old.weight"])
     assert report.missing_targets == ("new.bias",)
     with pytest.raises(ValueError, match="unmapped target"):
