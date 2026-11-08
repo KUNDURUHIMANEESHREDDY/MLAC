@@ -3,9 +3,11 @@ from dataclasses import asdict
 from typing import Any
 from mlac.evolution import EvolutionController
 from mlac.ir import Architecture
+from mlac.master_intelligence import MasterIntelligenceEngine
 from mlac.registry import ModelRegistry
 registry=ModelRegistry()
 evolution=EvolutionController()
+intelligence=MasterIntelligenceEngine()
 def create_app() -> Any:
     try:
         from fastapi import FastAPI,HTTPException
@@ -38,6 +40,16 @@ def create_app() -> Any:
             return asdict(proposal)
         except KeyError as exc: raise HTTPException(status_code=404,detail=str(exc)) from exc
         except (ValueError,PermissionError) as exc: raise HTTPException(status_code=422,detail=str(exc)) from exc
+    @app.post("/intelligence/plan")
+    def intelligence_plan(payload:dict[str,Any]):
+        try:
+            report=intelligence.plan(model_id=str(payload.get("model_id","")),
+                architecture=payload.get("architecture",{}),
+                objective=str(payload.get("objective","")),
+                constraints=payload.get("constraints"))
+            return report.to_dict()
+        except (KeyError,TypeError,ValueError) as exc:
+            raise HTTPException(status_code=422,detail=str(exc)) from exc
     @app.get("/proposals")
     def list_proposals(): return evolution.list_proposals()
     return app

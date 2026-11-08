@@ -7,6 +7,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 ## Implemented
 
 - Framework-neutral architecture, component, and tensor representation.
+- Master Intelligence Engine: objective normalization, architecture diagnosis, hypothesis generation, ranked experiment plans, and a validated optional LLM-provider interface.
 - In-memory model registry and read-only inspector for trusted, instantiated PyTorch modules.
 - Versioned dropout-configuration mutation on IR snapshots.
 - Proposal-only evolution controller and default-deny production mutation policy.
@@ -31,6 +32,19 @@ MLAC is an open-source research and engineering platform for inspecting machine-
     mlac version
 
 Optional API: pip install -e ".[api]" then mlac serve. Keep the unauthenticated API on localhost.
+
+## Master Intelligence planning
+
+The proposal-only planning engine works without a model-provider API:
+
+    from mlac.master_intelligence import MasterIntelligenceEngine
+    report = MasterIntelligenceEngine().plan(
+        model_id="baseline-001", architecture=architecture,
+        objective="Reduce inference latency by 30%",
+    )
+    print(report.to_dict())
+
+Optional API endpoint: `POST /intelligence/plan` with `model_id`, `architecture`, `objective`, and optional `constraints`. See `docs/MASTER_INTELLIGENCE.md` for the provider interface and safety boundaries. LLM suggestions are untrusted and validated against an operation allowlist; plans never execute or authorize themselves.
 
 ## Candidate evaluation workflow
 
