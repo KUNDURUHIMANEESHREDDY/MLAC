@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import sys
 import time
 from types import SimpleNamespace
@@ -350,3 +351,48 @@ def test_sqlite_api_state_survives_restart_and_keeps_principals_isolated(tmp_pat
     assert second_client.get("/models", headers=auth(second_token("bob"))).json() == []
     assert len(second_client.get("/proposals", headers=auth(second_token("alice"))).json()) == 1
     assert second_client.get("/proposals", headers=auth(second_token("bob"))).json() == []
+
+
+def test_sqlite_proposal_listing_decodes_only_authenticated_owner_rows(tmp_path):
+    """Keep corrupt proposal metadata from another tenant out of this owner's query."""
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    client, token = make_client(state_store=store)
+    alice = auth(token("alice"))
+    bob = auth(token("bob"))
+
+    alice_model = client.post("/models", headers=alice, json=architecture()).json()
+    bob_model = client.post("/models", headers=bob, json=architecture()).json()
+    alice_proposal = client.post(
+        f"/models/{alice_model['model_id']}/proposals",
+        headers=alice,
+        json={
+            "hypothesis": "Alice's proposal remains readable",
+            "operation": "dropout",
+            "parameters": {"probability": 0.05},
+        },
+    ).json()
+    bob_proposal = client.post(
+        f"/models/{bob_model['model_id']}/proposals",
+        headers=bob,
+        json={
+            "hypothesis": "Bob's proposal is isolated",
+            "operation": "dropout",
+            "parameters": {"probability": 0.15},
+        },
+    ).json()
+
+    connection = sqlite3.connect(store.path)
+    try:
+        connection.execute(
+            "UPDATE proposals SET parameters_json = ? WHERE proposal_id = ?",
+            ("not-json", bob_proposal["proposal_id"]),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    response = client.get("/proposals", headers=alice)
+    assert response.status_code == 200
+    assert [item["proposal_id"] for item in response.json()] == [
+        alice_proposal["proposal_id"]
+    ]
