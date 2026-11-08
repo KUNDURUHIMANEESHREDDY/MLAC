@@ -233,7 +233,7 @@ class MasterIntelligenceEngine:
         if not isinstance(raw, Mapping):
             raise ValueError(f"proposal {index}: proposal must be an object")
         operation = raw.get("operation")
-        if operation not in self.ALLOWED_OPERATIONS:
+        if not isinstance(operation, str) or operation not in self.ALLOWED_OPERATIONS:
             raise ValueError(f"proposal {index}: unsupported operation {operation!r}")
         supplied_params = raw.get("parameters", {})
         if not isinstance(supplied_params, Mapping):
@@ -292,7 +292,7 @@ class MasterIntelligenceEngine:
             if set(params) != {"activation"}:
                 raise ValueError(f"proposal {index}: set_mlp_activation requires only activation")
             activation = params["activation"]
-            if activation not in {"gelu", "relu", "silu", "tanh"}:
+            if not isinstance(activation, str) or activation not in {"gelu", "relu", "silu", "tanh"}:
                 raise ValueError(f"proposal {index}: unsupported MLP activation")
             if not any(
                 "mlp" in item.name.lower() or "feedforward" in item.name.lower()
