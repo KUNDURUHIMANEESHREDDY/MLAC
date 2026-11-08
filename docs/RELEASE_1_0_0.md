@@ -5,7 +5,7 @@
 MLAC 1.0.0 packages the governed architecture controller and the first production-candidate API runtime topology:
 
 - OIDC-authenticated, issuer/subject-scoped model and proposal API.
-- Optional durable SQLite metadata with transactional schema initialization and tenant-scoped queries.
+- Versioned PostgreSQL metadata for production, with SQLite retained for local single-host development; transactional schema initialization and tenant-scoped queries.
 - Shared Redis sliding-window rate limits for pre-authentication peers and authenticated principals; Redis outages fail closed.
 - Single-instance Docker deployment behind Caddy automatic HTTPS, with the API and Redis ports unpublished.
 - Non-root API container, read-only root filesystem, dropped capabilities, and pinned reverse-proxy trust.
@@ -19,7 +19,7 @@ The main-branch workflow must pass on the exact main commit. It runs Ruff, the f
 
 ## Production deployment status
 
-The repository contains a production-candidate deployment topology, not evidence of a live deployment. Production acceptance still requires an operator-owned host and DNS, real OIDC configuration, private Redis credentials, persistent encrypted storage, S3 Object Lock configuration, backup/restore drill, monitoring, and security review. The current metadata backend is SQLite and supports one API instance on one host; this is not an HA or multi-host database architecture.
+The repository contains a production-candidate deployment topology, not evidence of a live deployment. Production acceptance still requires an operator-owned host and DNS, real OIDC configuration, private Redis credentials, persistent encrypted storage, S3 Object Lock configuration, backup/restore drill, monitoring, and security review. The production metadata backend is PostgreSQL and rate limits are shared through Redis. The supplied Compose stack runs a single API container by default; API replicas may share the database and Redis when deployed behind a suitably configured orchestrator with bounded connection pools and health checks.
 
 The fixed evaluation worker, production dataset-signing key, held-out dataset, independent runtime attestor, and remote artifact store must also be exercised end-to-end before autonomous candidate operation is enabled in a target environment.
 
@@ -31,8 +31,8 @@ Controller self-evolution remains evaluation-only. It records candidate outcomes
 
 - [ ] Exact-main CI run passes, including Redis integration and Docker build.
 - [ ] GHCR image is published and deployment pins its immutable commit tag.
-- [ ] OIDC, HTTPS, Redis, SQLite persistence, and cross-tenant isolation verified on the target host.
-- [ ] S3 Object Lock backup uploaded and a restore drill completed.
+- [ ] OIDC, HTTPS, PostgreSQL persistence, Redis shared rate limits, and cross-tenant isolation verified on the target host.
+- [ ] PostgreSQL S3 Object Lock backup uploaded and a restore drill completed.
 - [ ] Fixed worker and signed held-out evaluation bundle pass end-to-end.
 - [ ] Runtime identity and deployment authority verified independently.
 - [ ] Monitoring, alerting, incident response, and rollback ownership recorded.
