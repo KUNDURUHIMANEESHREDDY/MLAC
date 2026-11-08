@@ -23,7 +23,7 @@ This runbook deploys the OIDC-authenticated API as a single API instance behind 
 - A tested backup bucket with S3 versioning and Object Lock COMPLIANCE enabled.
 - A workload/instance IAM role for the backup process with narrowly scoped S3 permissions; avoid long-lived AWS access keys in .env.
 
-The main-branch workflow publishes immutable image tags to ghcr.io/kunduruhimaneeshreddy/mlac, including sha-<commit>. Pin MLAC_IMAGE to the exact commit that passed CI; do not deploy the mutable main tag. The default Docker subnet is 172.30.0.0/24. Change the subnet and the pinned proxy IP together in docker-compose.yml, Dockerfile, and this runbook if it conflicts with the host network.
+The main-branch workflow publishes immutable image tags to ghcr.io/kunduruhimanesheddy/mlac, including sha-<commit>. Pin MLAC_IMAGE to the exact commit that passed CI; do not deploy the mutable main tag. The default Docker subnet is 172.30.0.0/24. Change the subnet and the pinned proxy IP together in docker-compose.yml, Dockerfile, and this runbook if it conflicts with the host network.
 
 ## Configure and start
 
@@ -69,10 +69,10 @@ Schedule the same command from a restricted host scheduler (for example, a syste
 
 Before starting a restore drill, verify every downloaded backup against the SHA-256 value read from trusted S3 object metadata (not a digest copied from the backup file itself):
 
-Run these commands from the repository root on the host. The verifier requires Python 3.10 or newer. PostgreSQL custom archives also require `pg_restore` from the PostgreSQL client tools; SQLite verification uses Python's standard library.
+Run these commands from the repository root on the host. The verifier requires Python 3.10 or newer and is invoked with `python3` so Debian/Ubuntu hosts do not need the optional `python` alias. PostgreSQL custom archives require `pg_restore` 16 or newer from the PostgreSQL client tools, matching the major version used by the backup image. SQLite verification uses Python's standard library.
 
-    python scripts/verify_backup.py /secure/restore/api-state.sqlite3 --sha256 "$EXPECTED_SHA256"
-    python scripts/verify_backup.py /secure/restore/api-state.dump --sha256 "$EXPECTED_SHA256" --format postgres-custom
+    python3 scripts/verify_backup.py /secure/restore/api-state.sqlite3 --sha256 "$EXPECTED_SHA256"
+    python3 scripts/verify_backup.py /secure/restore/api-state.dump --sha256 "$EXPECTED_SHA256" --format postgres-custom
 
 The verifier rejects symlinks and non-regular files, checks the expected SHA-256 in bounded-memory chunks, and detects only the SQLite and PostgreSQL custom formats emitted by this utility. SQLite is opened read-only with immutable/query-only settings and checked with PRAGMA integrity_check. PostgreSQL custom archives are inspected with `pg_restore --list`, which validates the archive header and table of contents only; it does not read or validate the data blocks, and no SQL is executed. A successful result proves the digest and these structural checks only. It does not prove that a full restore will succeed. It does not restore data or prove application-level recovery; the isolated restore drill below remains mandatory.
 
