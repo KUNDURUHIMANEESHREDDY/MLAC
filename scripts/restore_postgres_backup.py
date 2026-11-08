@@ -280,6 +280,13 @@ def restore_postgres_backup(
                     "--no-acl",
                     "--single-transaction",
                     "--no-password",
+                    # Supplying --dbname is required for pg_restore to execute
+                    # the archive. Without it pg_restore has no output target and
+                    # exits with: "one of -d/--dbname and -f/--file must be specified".
+                    # The database name is safe to expose; credentials remain in
+                    # the sanitized PG* environment and never appear in argv.
+                    "--dbname",
+                    target.database,
                     str(snapshot),
                 ],
                 env=target.environment(),
