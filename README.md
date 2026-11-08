@@ -8,7 +8,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 
 - Framework-neutral architecture, component, and tensor representation.
 - Master Intelligence Engine with OpenAI Responses and OpenAI-compatible Chat Completions provider adapters, bounded proposal validation, deterministic diagnostics, risk-aware decision ranking, and a governed plan-to-candidate evaluation workflow for supported TransformerBlock modifications.
-- In-memory model registry by default, with an opt-in transactional SQLite store for API model/proposal metadata; read-only inspector for trusted, instantiated PyTorch modules.
+- In-memory model registry for library use; the API supports tenant-scoped PostgreSQL persistence for production and an opt-in transactional SQLite store for local development; read-only inspector for trusted, instantiated PyTorch modules.
 - Versioned dropout-configuration mutation on IR snapshots.
 - Proposal-only evolution controller and default-deny production mutation policy.
 - Executable TransformerBlock with fused QKV attention and attention-head pruning with weight migration.
@@ -32,7 +32,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
     pytest
     mlac version
 
-Optional API: install `pip install -e ".[api]"` and configure `MLAC_API_JWKS_URL`, `MLAC_API_ISSUER`, and `MLAC_API_AUDIENCE` from a trusted OIDC provider before running `mlac serve`. Every non-health route requires a signed bearer JWT with issuer, audience, subject, issued-at, and expiry claims. The API verifies signing keys through the configured JWKS endpoint and scopes models/proposals to the issuer plus subject. Set `MLAC_API_STATE_DB` to an absolute local file path to persist model/proposal metadata across restarts; otherwise state remains process-local. Missing identity configuration fails closed with HTTP 503. See `docs/API_STATE.md` for storage semantics and backup guidance.
+Optional API: install `pip install -e ".[api]"` and configure `MLAC_API_JWKS_URL`, `MLAC_API_ISSUER`, and `MLAC_API_AUDIENCE` from a trusted OIDC provider before running `mlac serve`. Every non-health route requires a signed bearer JWT with issuer, audience, subject, issued-at, and expiry claims. The API verifies signing keys through the configured JWKS endpoint and scopes models/proposals to the issuer plus subject. Set `MLAC_API_DATABASE_URL` to a PostgreSQL DSN for durable production metadata, or `MLAC_API_STATE_DB` to an absolute local SQLite path for single-host development. Configure `MLAC_RATE_LIMIT_REDIS_URL` for shared pre-authentication and principal rate limits. Missing identity or configured backend fails closed. See `docs/API_STATE.md` for storage semantics and backup guidance.
 
 ## Production-candidate deployment
 
@@ -115,7 +115,7 @@ The pipeline can authorize only a candidate operation. It does not deploy or pro
 - Worker reports are trusted only to the extent that the reviewed, digest-pinned worker image and runtime are trusted.
 - Docker is not a complete defense against a compromised host, kernel, daemon, or runtime. Use a dedicated worker VM/host and stronger isolation for hostile code.
 - The optional API requires OIDC JWT authentication and issuer/subject ownership checks for every non-health route. Request bodies are capped at 1 MiB. If MLAC_RATE_LIMIT_REDIS_URL is configured, pre-authentication peer and authenticated-principal limits are enforced atomically in shared Redis; otherwise the bounded in-process limiter is for localhost development only. The CLI disables proxy-header trust and rejects non-loopback binds. The Docker deployment trusts forwarded headers only from its pinned Caddy container address.
-- When `MLAC_API_STATE_DB` is configured, model/proposal metadata use a versioned SQLite schema, parameterized statements, owner-indexed reads, foreign-key cascades, WAL journaling, and full synchronous commits. The default remains process-local. Shared Redis rate limiting is enabled by MLAC_RATE_LIMIT_REDIS_URL and fails closed if Redis is unavailable; without Redis, the bounded in-process limiter is suitable only for localhost development. The API CLI remains loopback-only; the container entrypoint is reachable only through the pinned Caddy network. SQLite backup/restore is an operator responsibility.
+- When `MLAC_API_DATABASE_URL` is configured, model/proposal metadata use a versioned PostgreSQL schema, parameterized statements, owner-indexed reads, and foreign-key cascades. `MLAC_API_STATE_DB` remains available for local SQLite use. Shared Redis rate limiting is enabled by `MLAC_RATE_LIMIT_REDIS_URL` and fails closed if Redis is unavailable; without Redis, the bounded in-process limiter is suitable only for localhost development. The API CLI remains loopback-only; the container entrypoint is reachable only through the pinned Caddy network. The backup utility supports PostgreSQL custom-format dumps and SQLite online backups with S3 Object Lock COMPLIANCE retention.
 - Trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
 - Host-side sandbox output collection uses descriptor-relative no-follow traversal and fails closed without POSIX openat/O_NOFOLLOW support; native Windows candidate evaluation is not yet supported.
 
