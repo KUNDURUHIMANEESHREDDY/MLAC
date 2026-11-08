@@ -12,7 +12,7 @@ import math
 import re
 import tempfile
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -184,6 +184,9 @@ class EpochMetrics:
 @dataclass(frozen=True)
 class TrainingResult:
     mode: str
+    config: TrainingConfig
+    dataset_revision: str
+    teacher_sha256: str | None
     model: nn.Module = field(repr=False, compare=False)
     checkpoint_state: Mapping[str, Tensor] = field(repr=False, compare=False)
     checkpoint_sha256: str
@@ -202,7 +205,9 @@ class TrainingResult:
 
     def summary(self) -> dict:
         return {
-            "mode": self.mode, "checkpoint_sha256": self.checkpoint_sha256,
+            "mode": self.mode, "training_config": asdict(self.config),
+            "dataset_revision": self.dataset_revision, "teacher_sha256": self.teacher_sha256,
+            "checkpoint_sha256": self.checkpoint_sha256,
             "dataset_sha256": self.dataset_sha256, "seed": self.seed,
             "best_epoch": self.best_epoch, "epochs_completed": self.epochs_completed,
             "trainable_parameters": self.trainable_parameters,
@@ -409,7 +414,9 @@ class TrainingEngine:
         )
         state = {key: value.detach().cpu().clone() for key, value in best_state.items()}
         return TrainingResult(
-            mode=mode, model=candidate, checkpoint_state=state,
+            mode=mode, config=config, dataset_revision=dataset.revision,
+            teacher_sha256=_state_digest(teacher_copy.state_dict()) if teacher_copy is not None else None,
+            model=candidate, checkpoint_state=state,
             checkpoint_sha256=_state_digest(state), dataset_sha256=dataset.digest,
             seed=config.seed, best_epoch=best_epoch, epochs_completed=len(history),
             trainable_parameters=trainable_count, total_parameters=total_count,
