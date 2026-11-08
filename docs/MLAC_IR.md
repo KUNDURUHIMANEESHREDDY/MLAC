@@ -197,6 +197,7 @@ The executor supports:
 - `transpose` / `t`
 - `permute`
 - `reshape`
+- `cast` (explicit dtype conversion, for example `{"dtype": "bf16"}`)
 - `split` / `split_qkv` (explicit `sections` or `split_size`, plus optional `axis`)
 - `concat` / `concatenate`
 - `slice` (`axis`, `start`, `end`)
@@ -204,8 +205,9 @@ The executor supports:
 
 Each transformation reads named source parameters and writes named target
 parameters. Target names must resolve through `ParameterMapping` to declared
-`TensorSpec` entries. Result rank and concrete dimensions are checked against
-the IR. The executor stages changes in a new mapping, clones generated tensors,
+`TensorSpec` entries. Result rank, concrete dimensions, and supported dtype
+labels are checked against the IR. The compiler also casts module parameters to
+their declared supported PyTorch dtypes before applying initialization. The executor stages changes in a new mapping, clones generated tensors,
 and returns a report; it does not mutate the caller's input mapping. If any
 step fails, no partial result is returned. Operations execute in declaration
 order, so a later step may consume a target created by an earlier step.
