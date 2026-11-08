@@ -17,8 +17,10 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import parse_qs, unquote, urlparse
 
+from scripts.restore_backup import _copy_backup_snapshot
 from scripts.verify_backup import verify_backup
 
 _DATABASE_NAME = re.compile(r"^mlac_restore_drill_[a-z0-9_]{1,44}$")
@@ -247,54 +249,65 @@ def restore_postgres_backup(
     """
     backup = Path(backup_path)
     target = parse_postgres_target(database_url)
-    verified = verify_backup(backup, expected_sha256, backup_format="postgres-custom")
 
     pg_restore = shutil.which("pg_restore")
     if pg_restore is None:
         raise RuntimeError("pg_restore is required for PostgreSQL restore drills")
 
-    if not _target_is_empty(target):
-        raise ValueError(
-            "restore target is not empty; refusing to modify an existing database"
+    # Hash verification and restore must consume the same private snapshot. A
+    # caller replacing the downloaded pathname after verification must not be
+    # able to change the bytes pg_restore receives.
+    with TemporaryDirectory(prefix="mlac-postgres-restore-") as workspace:
+        snapshot = Path(workspace) / "backup.snapshot"
+        _copy_backup_snapshot(backup, snapshot)
+        verified = verify_backup(
+            snapshot,
+            expected_sha256,
+            backup_format="postgres-custom",
         )
 
-    try:
-        result = subprocess.run(
-            [
-                pg_restore,
-                "--exit-on-error",
-                "--no-owner",
-                "--no-acl",
-                "--single-transaction",
-                "--no-password",
-                str(backup),
-            ],
-            env=target.environment(),
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=900,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("pg_restore exceeded the 15-minute restore limit") from exc
-    except OSError as exc:
-        raise RuntimeError("pg_restore could not be started") from exc
+        if not _target_is_empty(target):
+            raise ValueError(
+                "restore target is not empty; refusing to modify an existing database"
+            )
 
-    if result.returncode != 0:
-        # Restore output can contain schema names and database values. Keep it
-        # out of routine logs; the operator can inspect protected runner logs.
-        raise RuntimeError(
-            f"pg_restore failed with exit code {result.returncode}; "
-            "restore output was suppressed to avoid logging database contents"
-        )
+        try:
+            result = subprocess.run(
+                [
+                    pg_restore,
+                    "--exit-on-error",
+                    "--no-owner",
+                    "--no-acl",
+                    "--single-transaction",
+                    "--no-password",
+                    str(snapshot),
+                ],
+                env=target.environment(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=900,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("pg_restore exceeded the 15-minute restore limit") from exc
+        except OSError as exc:
+            raise RuntimeError("pg_restore could not be started") from exc
 
-    table_count = _count_restored_tables(target)
-    return {
-        "format": "postgres-custom",
-        "sha256": verified["sha256"],
-        "database": target.database,
-        "table_count": table_count,
-    }
+        if result.returncode != 0:
+            # Restore output can contain schema names and database values. Keep it
+            # out of routine logs; the operator can inspect protected runner logs.
+            raise RuntimeError(
+                f"pg_restore failed with exit code {result.returncode}; "
+                "restore output was suppressed to avoid logging database contents"
+            )
+
+        table_count = _count_restored_tables(target)
+        return {
+            "format": "postgres-custom",
+            "sha256": verified["sha256"],
+            "database": target.database,
+            "table_count": table_count,
+        }
 
 
 def main(argv: list[str] | None = None) -> int:
