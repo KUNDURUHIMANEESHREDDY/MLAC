@@ -76,3 +76,10 @@ def test_designer_bounds_combinatorial_search_before_enumeration():
     )
     with pytest.raises(ValueError, match="exceeding search_evaluation_limit"):
         ArchitectureDesigner().generate(constraints)
+
+
+def test_designer_rejects_fractional_dimensions_and_boolean_limits():
+    with pytest.raises(ValueError, match="input_size"):
+        DesignConstraints(input_size=4.5, output_size=2)
+    with pytest.raises(ValueError, match="candidate_limit"):
+        DesignConstraints(input_size=4, output_size=2, candidate_limit=True)
