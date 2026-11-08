@@ -147,7 +147,14 @@ def test_postgres_backup_restores_into_empty_disposable_database(
     def capture_restore_error(*args, **kwargs):
         result = real_run(*args, **kwargs)
         command = args[0]
-        if isinstance(command, list) and command and Path(command[0]).name == "pg_restore":
+        if (
+            isinstance(command, list)
+            and command
+            and Path(command[0]).name == "pg_restore"
+            and "--list" not in command
+        ):
+            # verify_backup uses pg_restore --list only to inspect the archive TOC;
+            # only the subsequent restore invocation must name the target database.
             assert "--dbname" in command
             assert command[command.index("--dbname") + 1] == target.database
             assert target.password not in " ".join(command)
