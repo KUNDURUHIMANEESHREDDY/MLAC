@@ -86,11 +86,10 @@ def test_two_redis_limiter_instances_share_the_same_budget():
     import os
     from uuid import uuid4
 
-    from redis import Redis
-
     url = os.getenv("MLAC_TEST_REDIS_URL")
     if not url:
         pytest.skip("MLAC_TEST_REDIS_URL is not configured")
+    from redis import Redis
     namespace = f"integration-{uuid4().hex}"
     first = RedisRateLimiter.from_url(
         url, namespace=namespace, limit=2, window_seconds=60
