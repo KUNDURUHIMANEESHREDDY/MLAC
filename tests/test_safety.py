@@ -69,7 +69,7 @@ def test_candidate_authorization_checks_growth_and_operation():
 
 def test_production_requires_matching_unexpired_external_signature():
     policy = GuardrailPolicy(allow_production_mutations=True)
-    digest = SafetyKernel(policy).policy_digest
+    digest = _digest(policy)
     kernel = SafetyKernel(policy, expected_policy_sha256=digest)
     key = b"external-operator-secret"
     approval = _approval(key)
@@ -91,7 +91,7 @@ def test_production_requires_matching_unexpired_external_signature():
 
 def test_expired_or_timezone_naive_approval_is_rejected():
     policy = GuardrailPolicy(allow_production_mutations=True)
-    kernel = SafetyKernel(policy)
+    kernel = SafetyKernel(policy, expected_policy_sha256=_digest(policy))
     key = b"external-operator-secret"
     expired_payload = {
         "approval_id": "old", "model_id": "model-123",
@@ -122,7 +122,7 @@ def test_policy_tampering_fails_integrity_check():
 
 def test_production_approval_cannot_be_disabled_by_tightening():
     policy = GuardrailPolicy(allow_production_mutations=True)
-    kernel = SafetyKernel(policy, expected_policy_sha256=SafetyKernel(policy).policy_digest)
+    kernel = SafetyKernel(policy, expected_policy_sha256=_digest(policy))
     with pytest.raises(PermissionError, match="only be tightened"):
         kernel.tighten(require_operator_approval=False)
 
