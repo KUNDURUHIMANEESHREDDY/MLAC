@@ -9,8 +9,9 @@ import base64
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping
+from typing import Any
 
 
 def canonical_json(value: Any) -> bytes:
@@ -38,7 +39,7 @@ def _load_private_key(value: bytes | str):
     key = serialization.load_pem_private_key(value.encode() if isinstance(value, str) else value, password=None)
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     if not isinstance(key, Ed25519PrivateKey):
-        raise ValueError("dataset manifest signer must use Ed25519")
+        raise TypeError("dataset manifest signer must use Ed25519")
     return key
 
 
@@ -47,7 +48,7 @@ def _load_public_key(value: bytes | str):
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     key = serialization.load_pem_public_key(value.encode() if isinstance(value, str) else value)
     if not isinstance(key, Ed25519PublicKey):
-        raise ValueError("trusted dataset signer key must use Ed25519")
+        raise TypeError("trusted dataset signer key must use Ed25519")
     return key
 
 
