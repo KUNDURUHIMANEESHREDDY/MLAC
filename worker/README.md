@@ -152,6 +152,7 @@ Example controller setup:
         image=worker_image_digest,
         store=experiment_store,
         trusted_worker_keys=trusted_worker_keys,
+        trusted_dataset_signers=trusted_dataset_signers,
         worker_identity_dir=worker_identity_dir,
         worker_entrypoint="/opt/mlac-worker/evaluate-lm",
         evaluation_policy=EvaluationPolicy(
