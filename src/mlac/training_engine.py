@@ -11,10 +11,10 @@ import json
 import math
 import re
 import tempfile
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
 try:
