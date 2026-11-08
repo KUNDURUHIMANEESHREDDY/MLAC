@@ -138,6 +138,17 @@ be established by the operator. See `worker/README.md` for the manifest,
 dataset schema, and limits.
 
 
+## MLAC-IR
+
+The versioned, framework-neutral MLAC-IR describes model dimensions and
+components, tensor contracts, graph connectivity, checkpoint parameter
+mappings, initialization strategies, compatibility constraints, runtime
+requirements/capabilities, and weight-transformation requirements. The expanded
+schema retains compatibility with the original core IR payload and provides
+structural validation, runtime compatibility checks, serialization, and stable
+fingerprints. See [docs/MLAC_IR.md](docs/MLAC_IR.md) for the schema, examples,
+invariants, and current limitations.
+
 ## Architecture Inspector
 
 The read-only PyTorch inspector supports module/tensor metadata through `inspect_torch_model`. The extended `inspect_torch_model_full` API adds best-effort `torch.fx` graph nodes and connectivity, parameter mappings, shape propagation from trusted example inputs, attention/GQA metadata, explicit-dimension KV-cache estimates, and optional forward-memory measurements. See [docs/ARCHITECTURE_INSPECTOR.md](docs/ARCHITECTURE_INSPECTOR.md) for usage and interpretation limits. Graph tracing is not guaranteed for arbitrary dynamic models; KV-cache sizing is analytical, and module output-byte totals are not peak-live activation measurements.
