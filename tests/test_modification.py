@@ -41,6 +41,15 @@ def test_attention_head_pruning_and_expansion_migrate_common_weights():
     )
     assert expanded.module.attention.num_heads == 5
     assert expanded.module(sample).shape == sample.shape
+    old_attention = pruned.module.attention
+    new_attention = expanded.module.attention
+    for section in range(3):
+        old_start = section * old_attention.inner_dim
+        new_start = section * new_attention.inner_dim
+        assert torch.equal(
+            new_attention.qkv.weight[new_start:new_start + old_attention.inner_dim],
+            old_attention.qkv.weight[old_start:old_start + old_attention.inner_dim],
+        )
     assert model.attention.num_heads == 4
 
 
@@ -76,6 +85,7 @@ def test_transformer_stack_can_add_and_remove_layers():
     )
     assert len(result.module) == 2
     assert result.module(sample).shape == sample.shape
+    assert all(not layer.training for layer in result.module)
     assert len(stack) == 2
 
 
