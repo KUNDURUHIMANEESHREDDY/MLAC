@@ -31,7 +31,7 @@ from mlac.weight_engine import (
 
 @dataclass(frozen=True)
 class TensorSplit:
-    """A fixed in-memory split; inputs are [N,...], labels are class IDs [N]."""
+    """A fixed in-memory split; inputs are [N,...], labels are integer IDs [N,...]."""
     inputs: Tensor
     labels: Tensor | None
     sample_ids: tuple[str, ...]
@@ -51,14 +51,14 @@ class TensorSplit:
             raise ValueError("each split must contain between 1 and 100000 examples")
         if self.inputs.numel() * self.inputs.element_size() > 256 * 1024 * 1024:
             raise ValueError("each input split is limited to 256 MiB")
-        if self.labels is not None and self.labels.numel() * self.labels.element_size() > 16 * 1024 * 1024:
-            raise ValueError("each label split is limited to 16 MiB")
         if self.labels is not None:
             if (not isinstance(self.labels, Tensor) or self.labels.device.type != "cpu"
                     or self.labels.ndim < 1 or self.labels.shape[0] != count):
                 raise ValueError("labels must be an integer tensor with leading dimension N")
             if self.labels.dtype not in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
                 raise ValueError("labels must use an integer dtype")
+            if self.labels.numel() * self.labels.element_size() > 16 * 1024 * 1024:
+                raise ValueError("each label split is limited to 16 MiB")
         if (not isinstance(self.sample_ids, tuple) or len(self.sample_ids) != count
                 or any(not isinstance(x, str) or not x or len(x) > 256 for x in self.sample_ids)
                 or len(set(self.sample_ids)) != count):
