@@ -218,6 +218,8 @@ field.
 
 The executor transforms tensors supplied by the caller; it does not fetch
 checkpoints, write artifact storage, train models, or promote a candidate.
+The `preserves_function` flag is declarative metadata supplied by the planner;
+the executor does not prove functional equivalence or numerical accuracy.
 Those responsibilities remain with the checkpoint, training, and governance
 services. The compiler and transformation executor are optional PyTorch
 adapters; the core IR module itself remains framework-independent.
