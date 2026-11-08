@@ -81,3 +81,20 @@ The workflow caps experiments at GovernancePolicy.max_candidates_per_run. Each c
 The Responses API integration uses schema-constrained output and disables response storage for planning calls. See the OpenAI API reference and Structured Outputs guide for current API details. Model access and availability depend on the API project configuration.
 
 A provider key is not included in this repository. A live provider call cannot occur until the operator configures a valid key and model access in the deployment environment.
+
+## Provider adapters
+
+The planning engine supports two live HTTP adapters:
+
+- **OpenAI Responses API** (default when an OpenAI key is present): `MLAC_REASONING_PROVIDER=openai-responses`, `MLAC_OPENAI_API_KEY`, optional `MLAC_OPENAI_MODEL`, `MLAC_OPENAI_BASE_URL`, and `MLAC_OPENAI_TIMEOUT_SECONDS`. This adapter requests strict JSON Schema output and sets `store=false`.
+- **OpenAI-compatible Chat Completions**: `MLAC_REASONING_PROVIDER=openai-compatible`, `MLAC_CHAT_API_KEY`, `MLAC_CHAT_MODEL`, optional `MLAC_CHAT_BASE_URL` (defaults to `https://api.openai.com/v1`) and `MLAC_CHAT_TIMEOUT_SECONDS`. This adapter uses JSON mode for compatibility with hosted and self-hosted servers implementing `/chat/completions`; the local planner validates every returned field and operation.
+
+Set `MLAC_REASONING_PROVIDER=rules` to force deterministic local planning even when credentials exist. Unknown provider names fail startup rather than silently selecting a different backend. Both network adapters require HTTPS, have bounded response sizes and timeouts, and never enable model tools. API keys must be injected through the deployment environment or a secret manager, never committed to source control.
+
+## Planning and decision gates
+
+The engine combines deterministic architecture diagnosis with provider-suggested hypotheses. Local validation is authoritative: it enforces the operation allowlist, inspected attention target and head indices, bounded profiling iterations, bounded rationale/effect/falsification text, finite scoring values, and proposal-count limits. Unsupported operations, extra operation parameters, malformed values, and invalid head sets are rejected before a plan can enter the workflow.
+
+Plans are deduplicated and ranked by estimated value × feasibility × risk weight (low: 1.0, medium: 0.85, high: 0.6), with feasibility and estimated value as deterministic tie-breakers. The report explains the top-ranked proposal. These scores are prioritization heuristics, not calibrated probabilities or evidence of model improvement.
+
+The planner remains proposal-only. It does not execute LLM-generated code, change policy, select arbitrary tools, deploy models, or promote candidates. Candidate construction is still restricted to the reviewed builder operations and every experiment must pass through the digest-pinned worker, signed-report verification, controller evaluation policy, and governance gates.
