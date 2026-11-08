@@ -12,6 +12,7 @@ from pathlib import Path
 import torch
 from mlac.transformer import TransformerBlock
 from mlac.modification import Modification, modify_model
+from mlac.weight_engine import WeightOptimizationPlan, WeightOptimizationStep, optimize_weights
 from mlac.attestation import canonical_json, directory_digests, sign_worker_result
 
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
@@ -122,6 +123,52 @@ def load_candidate(config: dict, baseline_path: Path, candidate_path: Path, mani
                 "num_experts": experts, "top_k": top_k, "expert_noise_std": noise,
             }),
         ).module
+    elif operation in {"prune_unstructured", "prune_structured", "fake_quantize_int8", "inject_lora"}:
+        target = params.get("target")
+        parameter_targets = {
+            "attention.qkv.weight", "attention.out_proj.weight",
+            "mlp.0.weight", "mlp.0.bias", "mlp.2.weight", "mlp.2.bias",
+        }
+        module_targets = {"attention.qkv", "attention.out_proj", "mlp.0", "mlp.2"}
+        if operation == "prune_unstructured":
+            amount = params.get("amount")
+            if set(params) != {"target", "amount"} or target not in parameter_targets:
+                raise ValueError("prune_unstructured manifest target/fields are invalid")
+            if isinstance(amount, bool) or not isinstance(amount, (int, float)) or not math.isfinite(amount) or not 0.0 < amount <= 0.5:
+                raise ValueError("prune_unstructured amount must be in (0, 0.5]")
+            config = {"amount": float(amount)}
+        elif operation == "fake_quantize_int8":
+            if set(params) != {"target"} or target not in parameter_targets:
+                raise ValueError("fake_quantize_int8 manifest target/fields are invalid")
+            config = {}
+        elif operation == "prune_structured":
+            dimension, indices = params.get("dimension"), params.get("indices")
+            if set(params) != {"target", "dimension", "indices"} or target not in {
+                "attention.qkv.weight", "attention.out_proj.weight", "mlp.0.weight", "mlp.2.weight"
+            }:
+                raise ValueError("prune_structured manifest target/fields are invalid")
+            if dimension not in {"input", "output"} or not isinstance(indices, list) or not indices:
+                raise ValueError("prune_structured dimension/indices are invalid")
+            if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in indices) or len(set(indices)) != len(indices):
+                raise ValueError("prune_structured indices must be unique non-negative integers")
+            config = {"dimension": dimension, "indices": indices}
+        else:
+            rank, alpha, dropout = params.get("rank"), params.get("alpha"), params.get("dropout", 0.0)
+            if set(params) - {"target", "rank", "alpha", "dropout"} or not {"target", "rank"}.issubset(params) or target not in module_targets:
+                raise ValueError("inject_lora manifest target/fields are invalid")
+            if isinstance(rank, bool) or not isinstance(rank, int) or not 1 <= rank <= 64:
+                raise ValueError("inject_lora rank must be in [1, 64]")
+            if alpha is None:
+                alpha = rank
+            if isinstance(alpha, bool) or not isinstance(alpha, (int, float)) or not math.isfinite(alpha) or not 0 < alpha <= 256:
+                raise ValueError("inject_lora alpha must be in (0, 256]")
+            if isinstance(dropout, bool) or not isinstance(dropout, (int, float)) or not math.isfinite(dropout) or not 0 <= dropout < 1:
+                raise ValueError("inject_lora dropout must be in [0, 1)")
+            config = {"rank": rank, "alpha": float(alpha), "dropout": float(dropout)}
+        candidate = optimize_weights(
+            baseline,
+            WeightOptimizationPlan((WeightOptimizationStep(operation, target, config),)),
+        ).model
     else:
         raise ValueError(f"unsupported candidate operation: {operation!r}")
     candidate.load_state_dict(load_state(candidate_path), strict=True)
