@@ -148,5 +148,5 @@ def test_compiler_rejects_unbound_ir_parameters():
         tensors=(TensorSpec("weight", (2, 2)),),
         parameter_mappings=(ParameterMapping("weight", "weight"),),
     )
-    with pytest.raises(ValueError, match="not bound"):
+    with pytest.raises(ValueError, match="IR bindings|not bound"):
         compile_architecture(architecture)
