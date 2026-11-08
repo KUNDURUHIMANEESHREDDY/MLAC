@@ -66,13 +66,51 @@ The operator-controlled trusted evaluation directory must follow worker/README.m
 
 The workflow caps experiments at GovernancePolicy.max_candidates_per_run. Each candidate is evaluated separately. A passing evaluation can authorize only the candidate operation under the existing governance policy; this is not production deployment or promotion. Inspect each PipelineResult and the persisted evaluation ledger.
 
+## Weight optimization proposals and evaluation
+
+Master Intelligence accepts bounded weight operations for the fixed
+`TransformerBlock` candidate target: unstructured magnitude pruning,
+structured Linear weight masking, symmetric INT8 fake quantization, and LoRA
+injection on allow-listed Linear modules. Deterministic planning can propose
+pruning and fake quantization for inspected MLP architectures; configured
+reasoning backends may propose any operation in the local allowlist.
+
+The candidate builder applies the corresponding `WeightOptimizationPlan`
+transactionally to a copy of the trusted baseline. It writes the candidate
+state dictionary and operation manifest into the isolated candidate directory.
+The fixed worker independently validates the operation, target path, and
+parameters; reconstructs the transformation from the operator-controlled
+baseline; and strictly loads the candidate state. The existing signed report,
+input digest verification, quality/performance gates, governance, artifact
+registry, and experiment ledger remain unchanged.
+
+Worker-supported targets are deliberately narrow:
+`attention.qkv`, `attention.out_proj`, `mlp.0`, and `mlp.2` for LoRA;
+their corresponding registered weights/biases for parameter transforms.
+Arbitrary module paths, generated code, fuzzy checkpoint mappings, and
+candidate-controlled architecture definitions are not accepted.
+
+LoRA injection is evaluated before adapter training unless a separately
+approved training workflow is used; its initially zero-initialized B factor
+means injection alone is not evidence of quality improvement. Fake INT8
+quantization leaves floating-point storage in place, and pruning masks zeros
+rather than physically shrinking tensors. The current regression worker
+measures task MSE and performance; operators should use the LM evaluation
+worker and suitable held-out task data for language-model quality decisions.
+
+Distillation currently provides a differentiable loss primitive in the Weight
+Engine, not a teacher/student training job. It is intentionally not exposed as
+an executable candidate operation until the Training Engine supplies a
+reproducible, separately governed training workflow. Checkpoint migration
+remains an explicit API utility and is not an arbitrary worker-side operation.
+
 ## Supported scope and limitations
 
-- OpenAI proposals are restricted to profile_model, prune_attention_heads, resize_attention_heads, resize_mlp_hidden, set_mlp_activation, and convert_mlp_to_moe. The local validator enforces operation-specific parameter bounds and inspected attention/MLP evidence.
+- OpenAI proposals are restricted to profile_model, structural Modification Engine operations, and the allow-listed prune_unstructured, prune_structured, fake_quantize_int8, and inject_lora weight operations. The local validator enforces operation-specific parameter bounds and fixed worker targets.
 - The trusted builder supports the reviewed TransformerBlock target: attention pruning/resizing, MLP hidden-width/activation changes, and MLP-to-MoE conversion. Layer-stack insertion/removal remains available through the local Modification Engine API but is not yet exposed through this single-block worker manifest.
 - Profile-only candidates are unchanged baseline checkpoints and serve as a control.
 - This worker's quality metric is negative MSE on operator-controlled tensors, not language-model perplexity or general reasoning quality.
-- Arbitrary multi-layer graph rewriting, positional-encoding surgery, KV cache, quantization, training, distillation, distributed experts, and generated-source execution are not implemented by this integration.
+- Arbitrary multi-layer graph rewriting, positional-encoding surgery, packed INT8 inference, training, distillation execution, distributed experts, and generated-source execution are not implemented by this integration. Fake quantization and zero-mask pruning do not guarantee runtime speedups.
 - Provider output is never trusted for execution. The local engine validates operation names, inspected component identity, head indices, required rationale, risk and scoring fields.
 - The workflow does not modify governance policy, worker identity, signing keys, trusted manifests, baseline checkpoints, or production models.
 
