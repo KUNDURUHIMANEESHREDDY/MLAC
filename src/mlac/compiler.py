@@ -183,7 +183,7 @@ def _topological_order(architecture: Architecture) -> tuple[list[GraphNode], dic
     outgoing: dict[str, list[str]] = defaultdict(list)
     indegree = {node_id: 0 for node_id in nodes}
     for edge in architecture.graph_edges:
-        incoming[edge.target].append(edge.source)
+        incoming[edge.target].append((edge.target_port, edge.source))
         outgoing[edge.source].append(edge.target)
         indegree[edge.target] += 1
     ready = deque(sorted(
@@ -200,13 +200,11 @@ def _topological_order(architecture: Architecture) -> tuple[list[GraphNode], dic
                 ready.append(target)
     if len(ordered) != len(nodes):
         raise ValueError("MLAC-IR compiler does not support cyclic graphs")
+    incoming_nodes = {}
     for node_id, sources in incoming.items():
-        port_order = {
-            edge.source: (edge.target_port, order_index[edge.source])
-            for edge in architecture.graph_edges if edge.target == node_id
-        }
-        sources.sort(key=lambda source: port_order[source])
-    return ordered, dict(incoming)
+        sources.sort(key=lambda item: (item[0], order_index[item[1]]))
+        incoming_nodes[node_id] = [source for _, source in sources]
+    return ordered, incoming_nodes
 
 
 def compile_architecture(
