@@ -37,6 +37,7 @@ class WeightTransformationReport:
     parameters: dict[str, Tensor]
     records: tuple[TransformationRecord, ...]
     unchanged_parameters: tuple[str, ...]
+    skipped: tuple[str, ...] = ()
 
 
 def _execute(
@@ -159,12 +160,16 @@ def apply_weight_transformations(
     tensor_specs = {item.name: item for item in architecture.tensors}
     mappings = {item.parameter_name: item for item in architecture.parameter_mappings}
     records: list[TransformationRecord] = []
+    skipped: list[str] = []
 
     for requirement in architecture.weight_transformations:
         missing = [name for name in requirement.source_parameters if name not in working]
         if missing:
             if strict:
                 raise KeyError(f"missing transformation sources: {', '.join(missing)}")
+            skipped.append(
+                f"{requirement.operation}: missing sources {', '.join(missing)}"
+            )
             continue
         for source_name in requirement.source_parameters:
             source = working[source_name]
@@ -196,4 +201,5 @@ def apply_weight_transformations(
         unchanged_parameters=tuple(sorted(original_names - {
             target for record in records for target in record.targets
         })),
+        skipped=tuple(skipped),
     )
