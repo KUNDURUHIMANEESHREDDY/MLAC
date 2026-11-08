@@ -13,7 +13,7 @@ def create_app() -> Any:
         from fastapi import FastAPI, HTTPException
     except ImportError as exc:
         raise RuntimeError("Install API dependencies: pip install 'mlac[api]'") from exc
-    app = FastAPI(title="MLAC", version="0.3.0")
+    app = FastAPI(title="MLAC", version="0.4.0")
 
     @app.get("/health")
     def health():
