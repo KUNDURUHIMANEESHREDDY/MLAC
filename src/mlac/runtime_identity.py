@@ -79,7 +79,7 @@ class RuntimeIdentityVerifier:
             raise PermissionError("runtime identity worker ID mismatch")
         if statement["image_digest"] != expected_image_digest:
             raise PermissionError("runtime identity image digest mismatch")
-        if not re.fullmatch(r"[^\\s@]+@sha256:[0-9a-f]{64}", expected_image_digest):
+        if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", expected_image_digest):
             raise ValueError("expected image must be pinned by sha256 digest")
         if not isinstance(statement["spiffe_id"], str) or not statement["spiffe_id"].startswith(f"spiffe://{self.trust_domain}/"):
             raise PermissionError("runtime identity SPIFFE trust domain mismatch")
