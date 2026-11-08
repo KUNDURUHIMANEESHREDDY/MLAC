@@ -16,7 +16,24 @@ def make_dataset(seed=11):
         labels = torch.arange(count) % 2
         inputs = centers[labels] + 0.2 * torch.randn(count, 2, generator=generator)
         splits.append(TensorSplit(inputs, labels, tuple(f"{prefix}-{i}" for i in range(count))))
-    return TrainingDataset(*splits, revision="toy-classification-v1")
+    dataset = TrainingDataset(*splits, revision="toy-classification-v1")
+    import tempfile
+    from pathlib import Path
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from mlac.dataset_manifest import create_signed_dataset_manifest
+    from mlac.training_engine import SignedDatasetBinding
+    root = Path(tempfile.mkdtemp(prefix="mlac-training-dataset-"))
+    for name, content in (("train.jsonl","train"),("validation.jsonl","validation"),("test.jsonl","heldout")):
+        (root/name).write_text(content,encoding="utf-8")
+    key = Ed25519PrivateKey.generate()
+    private = key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption())
+    public = key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo)
+    envelope = create_signed_dataset_manifest(root,dataset_id="toy-classification",revision=dataset.revision,
+        splits={"train":["train.jsonl"],"validation":["validation.jsonl"],"test":["test.jsonl"]},
+        signer_id="toy-training-signer",private_key_pem=private,dataset_fingerprint=dataset.digest)
+    return TrainingDataset(dataset.train,dataset.validation,dataset.heldout,dataset.revision,
+        SignedDatasetBinding(root,envelope,{"toy-training-signer":public}))
 
 
 def make_model():
@@ -125,6 +142,7 @@ def test_training_verifies_and_records_signed_dataset_manifest(tmp_path):
     public_pem = private_key.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
     )
+    dataset = make_dataset()
     envelope = create_signed_dataset_manifest(
         tmp_path, dataset_id="training-corpus", revision="signed-v1",
         splits={
@@ -132,8 +150,8 @@ def test_training_verifies_and_records_signed_dataset_manifest(tmp_path):
             "test": ["test.jsonl"],
         },
         signer_id="training-data-release", private_key_pem=private_pem,
+        dataset_fingerprint=dataset.digest,
     )
-    dataset = make_dataset()
     dataset = TrainingDataset(
         dataset.train, dataset.validation, dataset.heldout, revision="signed-v1",
         signed_manifest=SignedDatasetBinding(
@@ -231,3 +249,20 @@ def test_training_promotion_rejects_non_worker_compatible_bundle():
             result=result, trusted_evaluation_dir=".",
             model_id="classifier-v1", candidate_id="bad-candidate",
         )
+
+
+def test_training_fails_closed_without_signed_manifest():
+    dataset = make_dataset()
+    unsigned = TrainingDataset(dataset.train,dataset.validation,dataset.heldout,dataset.revision)
+    with pytest.raises(PermissionError,match="signed dataset manifest"):
+        TrainingEngine().fit(model=make_model(),teacher=make_model(),dataset=unsigned,
+            mode="distillation",config=TrainingConfig(epochs=1,scheduler="none"))
+
+
+def test_training_rejects_manifest_for_different_materialized_tensors():
+    dataset = make_dataset()
+    changed = TensorSplit(dataset.train.inputs + 0.01,dataset.train.labels,dataset.train.sample_ids)
+    mismatched = TrainingDataset(changed,dataset.validation,dataset.heldout,dataset.revision,dataset.signed_manifest)
+    with pytest.raises(PermissionError,match="fingerprint"):
+        TrainingEngine().fit(model=make_model(),teacher=make_model(),dataset=mismatched,
+            mode="distillation",config=TrainingConfig(epochs=1,scheduler="none"))
