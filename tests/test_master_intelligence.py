@@ -225,7 +225,7 @@ def test_weight_engine_proposals_are_ranked_and_bounded():
     report = MasterIntelligenceEngine(
         backend=CallableReasoningBackend(provider), max_plans=10
     ).plan(
-        model_id="m", architecture=sample_architecture(), objective="reduce memory"
+        model_id="m", architecture=sample_architecture(), objective="Improve quality"
     )
     by_operation = {plan.operation: plan for plan in report.plans}
     assert by_operation["prune_unstructured"].parameters == {
