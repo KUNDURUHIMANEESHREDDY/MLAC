@@ -67,6 +67,7 @@ compiler/weight-transform interfaces.
 
 The v1 search is exhaustive over the supplied discrete width set and bounded
 depth. The number of candidate combinations grows exponentially with depth;
-`candidate_limit` caps returned results but does not eliminate enumeration
-cost. This is not a Bayesian optimizer or neural architecture search trainer.
+`search_evaluation_limit` (default 10,000; hard maximum 100,000) rejects
+oversized searches before enumeration, while `candidate_limit` caps returned
+results. This is not a Bayesian optimizer or neural architecture search trainer.
 Use the Evaluation Laboratory to measure task quality before promotion.
