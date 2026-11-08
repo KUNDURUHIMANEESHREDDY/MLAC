@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import math
-import random
 import re
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -37,13 +36,13 @@ class TensorSplit:
     def __post_init__(self) -> None:
         if not isinstance(self.inputs, Tensor) or self.inputs.ndim < 2:
             raise ValueError("inputs must be a tensor with shape [N,...]")
-        if not self.inputs.is_floating_point() or not torch.isfinite(self.inputs).all():
-            raise ValueError("inputs must be finite floating-point tensors")
+        if self.inputs.device.type != "cpu" or not self.inputs.is_floating_point() or not torch.isfinite(self.inputs).all():
+            raise ValueError("inputs must be finite CPU floating-point tensors")
         count = self.inputs.shape[0]
         if count < 1 or count > 100_000:
             raise ValueError("each split must contain between 1 and 100000 examples")
         if self.labels is not None:
-            if not isinstance(self.labels, Tensor) or self.labels.shape != (count,):
+            if not isinstance(self.labels, Tensor) or self.labels.device.type != "cpu" or self.labels.shape != (count,):
                 raise ValueError("labels must be an integer tensor with shape [N]")
             if self.labels.dtype not in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
                 raise ValueError("labels must use an integer dtype")
@@ -89,7 +88,7 @@ class TrainingDataset:
                 value = tensor.detach().cpu().contiguous()
                 digest.update(str(value.dtype).encode("ascii"))
                 digest.update(str(tuple(value.shape)).encode("ascii"))
-                digest.update(value.numpy().tobytes())
+                digest.update(value.view(torch.uint8).numpy().tobytes())
         return digest.hexdigest()
 
 
@@ -197,7 +196,7 @@ def _state_digest(state: Mapping[str, Tensor]) -> str:
         digest.update(name.encode("utf-8"))
         digest.update(str(value.dtype).encode("ascii"))
         digest.update(str(tuple(value.shape)).encode("ascii"))
-        digest.update(value.numpy().tobytes())
+        digest.update(value.view(torch.uint8).numpy().tobytes())
     return digest.hexdigest()
 
 
@@ -311,8 +310,7 @@ class TrainingEngine:
             torch.use_deterministic_algorithms(True)
             with torch.random.fork_rng(devices=[]):
                 torch.manual_seed(config.seed)
-                random.seed(config.seed)
-                generator = torch.Generator(device="cpu").manual_seed(config.seed)
+                        generator = torch.Generator(device="cpu").manual_seed(config.seed)
                 for epoch in range(1, config.epochs + 1):
                     candidate.train()
                     order = torch.randperm(dataset.train.inputs.shape[0], generator=generator)
