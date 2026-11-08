@@ -130,6 +130,8 @@ def verify_backup(
         raise ValueError("backup SHA-256 does not match trusted metadata")
 
     detected_format = _detect_format(path)
+    if _regular_file_identity(path) != identity:
+        raise ValueError("backup path changed after digest verification")
     if backup_format != "auto" and backup_format != detected_format:
         raise ValueError(
             f"backup format mismatch: expected {backup_format}, detected {detected_format}"
@@ -140,6 +142,8 @@ def verify_backup(
     else:
         _verify_postgres(path)
 
+    if _regular_file_identity(path) != identity:
+        raise ValueError("backup path changed during format verification")
     return {"format": detected_format, "sha256": actual_digest}
 
 
