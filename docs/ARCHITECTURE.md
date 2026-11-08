@@ -16,3 +16,5 @@ MLAC separates model metadata, supported transformations, evaluation evidence, e
 Install the API extra and run `mlac serve`. Keep the unauthenticated development API on localhost. Before network exposure, add authentication, authorization, durable registry state, rate limits, artifact isolation, and an independently enforced sandbox.
 
 PostgreSQL, object storage, MLflow, Temporal, distributed training, model-provider adapters, sandboxed execution, and hardware schedulers remain roadmap items. The trusted authorization, recovery, and governance boundaries must remain outside autonomous self-modification.
+
+- **Safety kernel:** integrity-checks the trusted guardrail policy, permits only monotonic tightening, and requires externally signed, scoped, unexpired approval for production operations when production is explicitly enabled. This is an in-process application control, not a sandbox; production deployments still need external trust roots, replay protection, KMS/HSM-backed keys, and isolated execution.
