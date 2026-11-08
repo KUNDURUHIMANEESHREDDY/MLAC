@@ -60,6 +60,11 @@ class RuntimeIdentityVerifier:
 
     def verify(self, envelope: dict[str, Any], *, expected_worker_id: str,
                expected_image_digest: str) -> dict[str, Any]:
+        if not isinstance(expected_worker_id, str) or not expected_worker_id.strip():
+            raise ValueError("expected_worker_id must be non-empty")
+        if (not isinstance(expected_image_digest, str)
+                or not re.fullmatch(r"[^\\s@]+@sha256:[0-9a-f]{64}", expected_image_digest)):
+            raise ValueError("expected image must be pinned by sha256 digest")
         if not isinstance(envelope, dict) or set(envelope) != {"schema_version","statement","signature"}:
             raise ValueError("runtime identity envelope schema is invalid")
         if envelope["schema_version"] != 1:
@@ -90,7 +95,10 @@ class RuntimeIdentityVerifier:
         nonce = statement["nonce"]
         if not isinstance(nonce, str) or not re.fullmatch(r"[A-Za-z0-9_-]{22,128}", nonce):
             raise ValueError("runtime identity nonce is invalid")
-        now = self.clock().astimezone(timezone.utc)
+        current = self.clock()
+        if current.tzinfo is None or current.utcoffset() is None:
+            raise ValueError("clock must return a timezone-aware datetime")
+        now = current.astimezone(timezone.utc)
         issued, expires = _timestamp(statement["issued_at"]), _timestamp(statement["expires_at"])
         if issued > now or (now-issued).total_seconds() > self.max_age_seconds:
             raise PermissionError("runtime identity evidence is stale or from the future")
