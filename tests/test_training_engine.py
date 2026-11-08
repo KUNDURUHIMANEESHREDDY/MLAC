@@ -89,6 +89,7 @@ def test_sequence_logits_support_token_distillation_and_lora_training():
     for prefix, count in (("train", 24), ("validation", 8), ("heldout", 8)):
         tokens = torch.randint(0, 13, (count, 5), generator=generator)
         labels = torch.roll(tokens, shifts=-1, dims=1)
+        labels[:, -1] = -100  # standard ignored padding/target position
         splits.append(TensorSplit(tokens, labels, tuple(f"{prefix}-{i}" for i in range(count))))
     dataset = TrainingDataset(*splits, revision="token-sequence-v1")
     teacher = TinyLanguageModel().eval()
