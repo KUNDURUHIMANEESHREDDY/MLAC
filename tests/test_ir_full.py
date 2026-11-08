@@ -34,7 +34,12 @@ def test_full_ir_round_trip_and_fingerprint_are_stable():
         framework="pytorch",
         dimensions={"hidden_size": 32, "layers": 2},
         components=(Component("attn", "grouped_query_attention", {"heads": 4, "kv_heads": 2}),),
-        tensors=(TensorSpec("qkv.weight", (96, 32), "bf16"),),
+        tensors=(
+            TensorSpec("qkv.weight", (96, 32), "bf16"),
+            TensorSpec("q_proj.weight", (64, 32), "bf16"),
+            TensorSpec("k_proj.weight", (16, 32), "bf16"),
+            TensorSpec("v_proj.weight", (16, 32), "bf16"),
+        ),
         graph_nodes=(
             GraphNode("embed", "embedding"),
             GraphNode("attn", "attention", component_name="attn"),
@@ -42,6 +47,9 @@ def test_full_ir_round_trip_and_fingerprint_are_stable():
         graph_edges=(GraphEdge("embed", "attn", "qkv.weight"),),
         parameter_mappings=(
             ParameterMapping("blocks.0.attn.qkv.weight", "qkv.weight", "attn", "model.layers.0.qkv.weight", (96, 32)),
+            ParameterMapping("blocks.0.attn.q_proj.weight", "q_proj.weight", "attn", shape=(64, 32)),
+            ParameterMapping("blocks.0.attn.k_proj.weight", "k_proj.weight", "attn", shape=(16, 32)),
+            ParameterMapping("blocks.0.attn.v_proj.weight", "v_proj.weight", "attn", shape=(16, 32)),
         ),
         initialization=(InitializationStrategy("qkv.weight", "xavier_uniform", {"gain": 1.0}, seed=7),),
         runtime_requirements=RuntimeRequirements(
@@ -51,11 +59,12 @@ def test_full_ir_round_trip_and_fingerprint_are_stable():
         weight_transformations=(
             WeightTransformationRequirement(
                 "split_qkv", ("blocks.0.attn.qkv.weight",),
-                ("blocks.0.attn.q.weight", "blocks.0.attn.k.weight"),
-                {"split": [64, 16, 16]},
+                ("blocks.0.attn.q_proj.weight", "blocks.0.attn.k_proj.weight", "blocks.0.attn.v_proj.weight"),
+                {"axis": 0, "sections": [64, 16, 16]},
             ),
         ),
     )
+    assert architecture.validate() == ()
     restored = Architecture.from_dict(architecture.to_dict())
     assert restored == architecture
     assert restored.fingerprint() == architecture.fingerprint()
