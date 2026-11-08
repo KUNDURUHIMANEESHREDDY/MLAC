@@ -59,3 +59,28 @@ def test_shape_contract_failure_does_not_mutate_input():
 def test_missing_source_fails_closed():
     with pytest.raises(KeyError, match="missing transformation sources"):
         apply_weight_transformations(_split_architecture(), {})
+
+
+
+def test_cast_transformation_enforces_target_dtype_contract():
+    architecture = Architecture(
+        name="precision-migration",
+        family="mlp",
+        tensors=(
+            TensorSpec("source", (2, 2), "fp32"),
+            TensorSpec("target", (2, 2), "bf16"),
+        ),
+        parameter_mappings=(
+            ParameterMapping("source.weight", "source", shape=(2, 2)),
+            ParameterMapping("target.weight", "target", shape=(2, 2)),
+        ),
+        weight_transformations=(
+            WeightTransformationRequirement(
+                "cast", ("source.weight",), ("target.weight",), {"dtype": "bf16"}
+            ),
+        ),
+    )
+    source = torch.ones((2, 2), dtype=torch.float32)
+    result = apply_weight_transformations(architecture, {"source.weight": source})
+    assert result.parameters["target.weight"].dtype == torch.bfloat16
+    assert torch.equal(result.parameters["target.weight"].float(), source)
