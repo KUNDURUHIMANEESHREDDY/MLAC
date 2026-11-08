@@ -31,7 +31,7 @@ def migrate(source_path: str, target_dsn: str) -> tuple[int, int]:
                 metadata = model["metadata"]
                 owner = metadata.get("owner", "")
                 if not isinstance(owner, str):
-                    raise ValueError("source model owner must be a string")
+                    raise TypeError("source model owner must be a string")
                 connection.execute(
                     """
                     INSERT INTO models (
