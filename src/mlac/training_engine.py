@@ -229,7 +229,7 @@ def _state_digest(state: Mapping[str, Tensor]) -> str:
         digest.update(name.encode("utf-8"))
         digest.update(str(value.dtype).encode("ascii"))
         digest.update(str(tuple(value.shape)).encode("ascii"))
-        digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
+        _update_tensor_digest(digest, value)
     return digest.hexdigest()
 
 
