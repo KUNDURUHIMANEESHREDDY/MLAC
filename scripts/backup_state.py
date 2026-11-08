@@ -39,14 +39,18 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="mlac-backup-") as directory:
         backup_path = Path(directory) / "api-state.sqlite3"
-        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as source:
+        with sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True) as source:
             with sqlite3.connect(backup_path) as destination:
                 source.backup(destination)
                 result = destination.execute("PRAGMA integrity_check").fetchone()
                 if result is None or result[0] != "ok":
                     raise RuntimeError("SQLite backup integrity check failed")
         os.chmod(backup_path, 0o600)
-        digest = hashlib.sha256(backup_path.read_bytes()).hexdigest()
+        digest_hash = hashlib.sha256()
+        with backup_path.open("rb") as backup_file:
+            for chunk in iter(lambda: backup_file.read(1024 * 1024), b""):
+                digest_hash.update(chunk)
+        digest = digest_hash.hexdigest()
         created = datetime.now(timezone.utc)
         retain_until = created + timedelta(days=retention_days)
         key = f"mlac/api-state/{created:%Y/%m/%d}/api-state-{created:%Y%m%dT%H%M%SZ}-{digest[:16]}.sqlite3"
@@ -60,6 +64,11 @@ def main() -> None:
         if os.getenv("MLAC_BACKUP_KMS_KEY_ID"):
             extra["SSEKMSKeyId"] = os.environ["MLAC_BACKUP_KMS_KEY_ID"]
         client.upload_file(str(backup_path), bucket, key, ExtraArgs=extra)
+        uploaded = client.head_object(Bucket=bucket, Key=key)
+        if uploaded.get("ObjectLockMode") != "COMPLIANCE":
+            raise RuntimeError("uploaded backup is not protected by COMPLIANCE retention")
+        if uploaded.get("Metadata", {}).get("sha256") != digest:
+            raise RuntimeError("uploaded backup SHA-256 metadata does not match")
         print(f"Backup uploaded: s3://{bucket}/{key} sha256={digest} retain_until={retain_until.isoformat()}")
 
 
