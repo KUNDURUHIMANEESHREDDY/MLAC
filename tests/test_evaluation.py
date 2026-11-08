@@ -103,3 +103,14 @@ def test_quality_evaluator_runs_in_eval_mode_and_restores_training_mode():
                        iterations=1, warmup=0)
     assert observed_modes == [False, False]
     assert model.training
+
+
+def test_task_quality_is_required_by_default():
+    model = TransformerBlock(d_model=8, num_heads=2).eval()
+    result = evaluate_candidate(
+        model, model, torch.randn(1, 2, 8), iterations=1, warmup=0,
+        policy=EvaluationPolicy(max_latency_regression_ratio=1000),
+    )
+    assert not result.passed
+    assert not result.promotion_eligible
+    assert not result.checks["quality_evaluated"]
