@@ -55,6 +55,11 @@ class OperatorApproval:
         }
 
 
+def guardrail_policy_digest(policy: GuardrailPolicy) -> str:
+    """Compute a canonical digest for pinning in an external deployment manifest."""
+    return _canonical_digest(asdict(policy))
+
+
 def approval_signature(payload: dict[str, str], signing_key: bytes) -> str:
     """Return the HMAC-SHA256 signature; call only in the external operator service."""
     if not signing_key:
