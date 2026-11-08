@@ -25,12 +25,16 @@ class TensorSpec:
     trainable: bool = True
 
     def __post_init__(self) -> None:
-        if not self.name.strip():
+        if not isinstance(self.name, str) or not self.name.strip():
             raise ValueError("tensor name must be non-empty")
-        if any(isinstance(dim, int) and dim < 0 for dim in self.shape):
+        if not isinstance(self.dtype, str) or not self.dtype.strip():
+            raise ValueError("tensor dtype must be non-empty")
+        if not isinstance(self.layout, str) or not self.layout.strip():
+            raise ValueError("tensor layout must be non-empty")
+        if any(type(dim) is int and dim < 0 for dim in self.shape):
             raise ValueError("tensor dimensions must be non-negative")
-        if any(not isinstance(dim, (int, str)) for dim in self.shape):
-            raise TypeError("tensor dimensions must be integers or symbolic strings")
+        if any(type(dim) is not int and (not isinstance(dim, str) or not dim.strip()) for dim in self.shape):
+            raise TypeError("tensor dimensions must be integers or non-empty symbolic strings")
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,8 @@ class GraphEdge:
     def __post_init__(self) -> None:
         if not self.source.strip() or not self.target.strip():
             raise ValueError("graph edge endpoints must be non-empty")
+        if not self.source_port.strip() or not self.target_port.strip():
+            raise ValueError("graph edge ports must be non-empty")
 
 
 @dataclass(frozen=True)
@@ -83,6 +89,10 @@ class ParameterMapping:
     def __post_init__(self) -> None:
         if not self.parameter_name.strip() or not self.tensor_name.strip():
             raise ValueError("parameter and tensor names must be non-empty")
+        if any(type(dim) is int and dim < 0 for dim in self.shape):
+            raise ValueError("parameter mapping dimensions must be non-negative")
+        if any(type(dim) is not int and (not isinstance(dim, str) or not dim.strip()) for dim in self.shape):
+            raise TypeError("parameter mapping dimensions must be integers or symbolic strings")
 
 
 @dataclass(frozen=True)
@@ -121,6 +131,8 @@ class RuntimeRequirements:
     maximum_sequence_length: int | None = None
 
     def __post_init__(self) -> None:
+        if self.backend is not None and not self.backend.strip():
+            raise ValueError("backend must be non-empty when specified")
         if self.minimum_memory_bytes is not None and self.minimum_memory_bytes < 0:
             raise ValueError("minimum_memory_bytes must be non-negative")
         if self.maximum_sequence_length is not None and self.maximum_sequence_length < 1:
@@ -135,6 +147,14 @@ class RuntimeCapabilities:
     devices: tuple[str, ...] = ()
     available_memory_bytes: int | None = None
     maximum_sequence_length: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.backend.strip():
+            raise ValueError("runtime backend must be non-empty")
+        if self.available_memory_bytes is not None and self.available_memory_bytes < 0:
+            raise ValueError("available_memory_bytes must be non-negative")
+        if self.maximum_sequence_length is not None and self.maximum_sequence_length < 1:
+            raise ValueError("runtime maximum_sequence_length must be positive")
 
 
 @dataclass(frozen=True)
@@ -196,6 +216,23 @@ class Architecture:
                 errors.append(f"duplicate {label} identifiers: {', '.join(duplicates)}")
 
         component_set, tensor_set, node_set = set(component_names), set(tensor_names), set(node_ids)
+        indegree = {node_id: 0 for node_id in node_set}
+        adjacency: dict[str, list[str]] = {node_id: [] for node_id in node_set}
+        for edge in self.graph_edges:
+            if edge.source in node_set and edge.target in node_set:
+                adjacency[edge.source].append(edge.target)
+                indegree[edge.target] += 1
+        ready = [node_id for node_id, degree in indegree.items() if degree == 0]
+        visited = 0
+        while ready:
+            current = ready.pop()
+            visited += 1
+            for target in adjacency[current]:
+                indegree[target] -= 1
+                if indegree[target] == 0:
+                    ready.append(target)
+        if visited != len(node_set):
+            errors.append("graph contains a cycle; MLAC-IR v1 requires an acyclic dataflow graph")
         for node in self.graph_nodes:
             if node.component_name and node.component_name not in component_set:
                 errors.append(f"node {node.node_id!r} references unknown component {node.component_name!r}")
