@@ -165,9 +165,7 @@ public-key trust store, separately from worker signing keys):
 Install optional development dependencies with
 `pip install -e ".[dev,lm-eval]"`. The worker image installs pinned
 Transformers and safetensors versions. Rebuild, scan, and pin the image by
-immutable digest after every worker change. Dataset licensing, provenance,
-contamination controls, split integrity, and benchmark suitability remain
-operator responsibilities.
+immutable digest after every worker change. Dataset file integrity and signer provenance are enforced by the controller. Dataset licensing, contamination controls, label correctness, semantic preprocessing, and benchmark suitability remain operator responsibilities.
 
 ## Worker identity and signed evidence (Phase 7)
 
