@@ -9,13 +9,13 @@ MLAC 1.0.0 packages the governed architecture controller and the first productio
 - Shared Redis sliding-window rate limits for pre-authentication peers and authenticated principals; Redis outages fail closed.
 - Single-instance Docker deployment behind Caddy automatic HTTPS, with the API and Redis ports unpublished.
 - Non-root API container, read-only root filesystem, dropped capabilities, and pinned reverse-proxy trust.
-- SQLite online backups uploaded to an S3 bucket with versioning and Object Lock COMPLIANCE retention.
+- PostgreSQL custom-format backups (and SQLite development backups) uploaded to S3 with versioning and Object Lock COMPLIANCE retention.
 - Signed dataset provenance enforced for training and evaluation, plus bounded recursive controller evaluation with immutable authorization and recovery boundaries.
 - CI lint, unit/integration tests, Docker image build, package build/install, and CLI version smoke test.
 
 ## Build and verification
 
-The main-branch workflow must pass on the exact main commit. It runs Ruff, the full pytest suite (including shared-Redis integration tests), Docker build, wheel/sdist build, wheel installation, and the mlac version smoke test. The container publication workflow publishes an immutable SHA-tagged image to GHCR. Do not deploy the mutable main tag.
+The main-branch workflow must pass on the exact main commit. It runs Ruff, the full pytest suite (including shared-Redis and PostgreSQL integration tests), Docker build, wheel/sdist build, wheel installation, and the mlac version smoke test. The container publication workflow publishes an immutable SHA-tagged image to GHCR. Do not deploy the mutable main tag.
 
 ## Production deployment status
 
