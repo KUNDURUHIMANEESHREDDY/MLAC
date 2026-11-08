@@ -3,10 +3,8 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import jwt
 import pytest
-
-pytest.importorskip("fastapi")
-jwt = pytest.importorskip("jwt")
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
