@@ -249,9 +249,11 @@ def _add_transformer_block(module: nn.Sequential, config: Mapping[str, Any]) -> 
         parameter = next(reference.parameters())
         block = block.to(device=parameter.device, dtype=parameter.dtype)
     block.train(module.training)
+    was_training = module.training
     layers = list(module.children())
     layers.insert(index, block)
     module.__init__(*layers)
+    module.train(was_training)
     return {"index": index, "d_model": d_model, "num_heads": num_heads, "mlp_ratio": mlp_ratio}
 
 
@@ -274,8 +276,10 @@ def _remove_layer(module: nn.Sequential, config: Mapping[str, Any]) -> dict[str,
     if isinstance(removed, TransformerBlock):
         if any(not isinstance(layer, TransformerBlock) for layer in layers):
             raise TypeError("TransformerBlock removal requires a homogeneous transformer stack")
+    was_training = module.training
     layers.pop(index)
     module.__init__(*layers)
+    module.train(was_training)
     return {"index": index, "removed_type": type(removed).__name__}
 
 
@@ -350,8 +354,10 @@ def _apply_one(module: nn.Module, item: Modification) -> dict[str, Any]:
             parameter = next(module.parameters(), None)
             if parameter is not None:
                 layer = layer.to(device=parameter.device, dtype=parameter.dtype)
+        was_training = module.training
         layers.insert(index, layer)
         module.__init__(*layers)
+        module.train(was_training)
         return {"index": index, "in_features": in_features, "out_features": out_features}
     raise ValueError(f"unsupported architecture modification: {operation!r}")
 
