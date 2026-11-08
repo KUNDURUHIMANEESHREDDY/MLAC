@@ -22,17 +22,7 @@ _IMAGE_DIGEST = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
-def _read_output_files(output: Path, max_bytes: int) -> dict[str, bytes]:
-    """Read regular output files using descriptor-relative, no-follow opens.
-
-    The output directory is writable by the container. Path-based checks such
-    as is_symlink() followed by read_bytes() are vulnerable to replacement
-    between the check and open. Pin each directory and open every child relative
-    to its parent descriptor with O_NOFOLLOW instead.
-    """
-    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
-        raise ValueError("max_bytes must be a non-negative integer")
-
+def _require_safe_output_collection() -> None:
     required = (
         os.open in os.supports_dir_fd
         and os.stat in os.supports_dir_fd
@@ -45,6 +35,20 @@ def _read_output_files(output: Path, max_bytes: int) -> dict[str, bytes]:
             "safe sandbox output collection requires descriptor-relative "
             "openat and O_NOFOLLOW support; refusing path-based fallback"
         )
+
+
+def _read_output_files(output: Path, max_bytes: int) -> dict[str, bytes]:
+    """Read regular output files using descriptor-relative, no-follow opens.
+
+    The output directory is writable by the container. Path-based checks such
+    as is_symlink() followed by read_bytes() are vulnerable to replacement
+    between the check and open. Pin each directory and open every child relative
+    to its parent descriptor with O_NOFOLLOW instead.
+    """
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
+        raise ValueError("max_bytes must be a non-negative integer")
+
+    _require_safe_output_collection()
 
     close_on_exec = getattr(os, "O_CLOEXEC", 0)
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | close_on_exec
@@ -225,6 +229,7 @@ class DockerSandboxRunner:
         ):
             raise ValueError("command must be a non-empty argv sequence of valid strings")
 
+        _require_safe_output_collection()
         docker = shutil.which(self.docker_executable)
         if docker is None:
             raise RuntimeError("Docker executable is unavailable; refusing unsafe fallback")
