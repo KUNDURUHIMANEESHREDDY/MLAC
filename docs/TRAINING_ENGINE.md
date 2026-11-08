@@ -9,8 +9,10 @@ it never mutates the caller's model or promotes/deploys a model.
 
 Training data is supplied as three explicit `TensorSplit` objects:
 `train`, `validation`, and `heldout`. Each contains CPU tensors
-`inputs[N,...]`, integer class labels `labels[N]`, and unique
-`sample_ids[N]`. All splits must have matching feature shapes and disjoint
+`inputs[N,...]` (floating-point features or integer token IDs), integer labels
+`labels[N,...]`, and unique `sample_ids[N]`. Labels must match the model
+logits shape with the final class/vocabulary dimension removed. All splits
+must have matching feature shapes and disjoint
 sample IDs. Each split is capped at 100,000 examples. A dataset revision plus
 the exact tensor bytes, shapes, dtypes, and sample IDs form a SHA-256 dataset
 digest. The engine does not execute dataset code, load arbitrary serialized
@@ -32,8 +34,11 @@ and split correctness remain operator responsibilities.
   LoRA into named `nn.Linear` modules. The copied base model is frozen and
   only adapter A/B parameters are passed to AdamW. Labels are required.
 
-Both modes currently expect a model returning finite classification logits
-with shape `[batch, classes]` and integer class labels. This is a trusted
+Both modes support finite classification or sequence logits with shape
+`[batch,...,classes]`; labels have the corresponding `[batch,...]` shape.
+This supports token-level next-token distillation and supervised LoRA updates
+for causal language models that accept integer token IDs. Held-out accuracy
+is token accuracy for sequence models. This is a trusted
 in-process library API: callers must supply reviewed model objects. The
 controller does not execute model or dataset code from an untrusted manifest.
 
