@@ -25,7 +25,21 @@ from mlac.ir import Architecture
 from mlac.master_intelligence import MasterIntelligenceEngine
 from mlac.openai_backend import OpenAIProviderError, OpenAIResponsesBackend
 from mlac.registry import ModelRegistry
+from mlac.rate_limit import RateLimiterUnavailable, RedisRateLimiter
 from mlac.sqlite_state import SQLiteStateStore
+
+
+def _configured_rate_limiter(*, namespace: str, limit: int, window_seconds: float, max_keys: int):
+    """Use Redis when configured; otherwise retain the bounded local limiter."""
+    redis_url = os.getenv("MLAC_RATE_LIMIT_REDIS_URL")
+    if redis_url:
+        return RedisRateLimiter.from_url(
+            redis_url,
+            namespace=namespace,
+            limit=limit,
+            window_seconds=window_seconds,
+        )
+    return _PrincipalRateLimiter(limit=limit, window_seconds=window_seconds, max_keys=max_keys)
 
 
 def _default_intelligence_engine() -> MasterIntelligenceEngine:
@@ -191,6 +205,19 @@ class PreAuthenticationRateLimitMiddleware:
         peer = client[0] if client and client[0] else "unknown"
         try:
             self.rate_limiter.check(peer)
+        except RateLimiterUnavailable:
+            body = b'{"detail":"Shared rate-limit service is unavailable"}'
+            await send({
+                "type": "http.response.start",
+                "status": 503,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                    (b"retry-after", b"5"),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body})
+            return
         except RuntimeError as exc:
             body = b'{"detail":"Authentication request rate limit exceeded"}'
             await send({
@@ -272,12 +299,14 @@ def create_app(
         jwks_client = PyJWKClient(configured_jwks_url, cache_keys=True, timeout=5)
 
     auth_configured = bool(jwks_client is not None and configured_issuer and configured_audience)
-    principal_rate_limiter = _PrincipalRateLimiter(
+    principal_rate_limiter = _configured_rate_limiter(
+        namespace="principal",
         limit=rate_limit,
         window_seconds=rate_window_seconds,
         max_keys=rate_limit_max_keys,
     )
-    peer_rate_limiter = _PrincipalRateLimiter(
+    peer_rate_limiter = _configured_rate_limiter(
+        namespace="peer",
         limit=pre_auth_rate_limit,
         window_seconds=pre_auth_window_seconds,
         max_keys=pre_auth_max_keys,
@@ -331,6 +360,8 @@ def create_app(
         principal = f"{configured_issuer}|{subject}"
         try:
             principal_rate_limiter.check(principal)
+        except RateLimiterUnavailable as exc:
+            raise HTTPException(status_code=503, detail="Shared rate-limit service is unavailable") from exc
         except RuntimeError as exc:
             raise HTTPException(
                 status_code=429,
@@ -354,6 +385,12 @@ def create_app(
                 state_store.health_check()
             except (OSError, SQLiteError, RuntimeError) as exc:
                 raise HTTPException(status_code=503, detail="Configured state store is unavailable") from exc
+        if isinstance(principal_rate_limiter, RedisRateLimiter):
+            try:
+                principal_rate_limiter.health_check()
+                peer_rate_limiter.health_check()
+            except RateLimiterUnavailable as exc:
+                raise HTTPException(status_code=503, detail="Shared rate-limit service is unavailable") from exc
         return {
             "status": "ready",
             "scope": "localhost-development",
