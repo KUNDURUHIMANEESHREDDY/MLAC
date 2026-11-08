@@ -143,12 +143,25 @@ def test_public_package_exposes_ir_graph_types_and_lazy_adapters():
     assert callable(apply_weight_transformations)
 
 
-def test_machine_readable_ir_schema_is_published():
+def test_machine_readable_ir_schema_is_published_and_validates_payloads():
     import json
     from pathlib import Path
+    from jsonschema import Draft202012Validator
 
     schema_path = Path(__file__).parents[1] / "schemas" / "mlac-ir-v1.schema.json"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    architecture = Architecture(
+        name="schema-check",
+        family="mlp",
+        dimensions={"hidden_size": 64, "scale": 1.5},
+        tensors=(TensorSpec("weight", (64, 64), "fp32"),),
+        runtime_requirements=RuntimeRequirements(
+            backend="pytorch", required_features=("bf16",), required_devices=("cuda",)
+        ),
+    )
+    payload = json.loads(json.dumps(architecture.to_dict()))
+    Draft202012Validator(schema).validate(payload)
     assert schema["$schema"].endswith("2020-12/schema")
     assert schema["$defs"]["architecture"]["properties"]["schema_version"]["const"] == 1
     assert "runtimeCapabilities" in schema["$defs"]
