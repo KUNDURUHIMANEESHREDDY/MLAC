@@ -22,6 +22,32 @@ from mlac.ir import Architecture, GraphNode, ParameterMapping
 OperatorFactory = Callable[[Mapping[str, Any]], nn.Module]
 
 
+_TORCH_DTYPES = {
+    "fp16": torch.float16, "float16": torch.float16,
+    "bf16": torch.bfloat16, "bfloat16": torch.bfloat16,
+    "fp32": torch.float32, "float32": torch.float32,
+    "fp64": torch.float64, "float64": torch.float64,
+    "int8": torch.int8, "uint8": torch.uint8,
+    "int16": torch.int16, "int32": torch.int32, "int64": torch.int64,
+    "bool": torch.bool,
+}
+
+
+def _apply_tensor_dtypes(compiled: "CompiledArchitecture") -> None:
+    parameters = dict(compiled.named_parameters())
+    tensor_specs = {item.name: item for item in compiled.architecture.tensors}
+    for mapping in compiled.architecture.parameter_mappings:
+        spec = tensor_specs.get(mapping.tensor_name)
+        key = compiled.parameter_keys.get(mapping.parameter_name)
+        if spec is None or key is None or key not in parameters or spec.dtype == "unknown":
+            continue
+        dtype = _TORCH_DTYPES.get(spec.dtype.lower())
+        if dtype is None:
+            raise ValueError(f"unsupported PyTorch tensor dtype in MLAC-IR: {spec.dtype!r}")
+        parameter = parameters[key]
+        parameter.data = parameter.data.to(dtype=dtype)
+
+
 class _Functional(nn.Module):
     def __init__(self, function: Callable[..., Any]):
         super().__init__()
@@ -400,5 +426,6 @@ def compile_architecture(
         architecture, compiled_nodes, modules, incoming,
         [node.node_id for node in input_nodes], output_nodes, parameter_keys,
     )
+    _apply_tensor_dtypes(compiled)
     _apply_initialization(compiled)
     return compiled
