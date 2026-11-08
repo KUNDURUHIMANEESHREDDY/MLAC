@@ -111,7 +111,7 @@ def prune_attention_heads(block: TransformerBlock, heads_to_remove: Iterable[int
         [h * old.head_dim + offset for h in retained for offset in range(old.head_dim)],
         dtype=torch.long, device=old.qkv.weight.device,
     )
-    qkv_indices = torch.cat((head_indices, head_indices + old.d_model, head_indices + 2 * old.d_model))
+    qkv_indices = torch.cat((head_indices, head_indices + old.inner_dim, head_indices + 2 * old.inner_dim))
     with torch.no_grad():
         new_attention.qkv.weight.copy_(old.qkv.weight.index_select(0, qkv_indices))
         if old.qkv.bias is not None:
