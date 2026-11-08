@@ -34,6 +34,12 @@ def modify_model(*args, **kwargs):
     return _modify(*args, **kwargs)
 
 
+def optimize_weights(*args, **kwargs):
+    """Lazily execute a transactional, allow-listed weight optimization plan."""
+    from mlac.weight_engine import optimize_weights as _optimize
+    return _optimize(*args, **kwargs)
+
+
 def apply_weight_transformations(*args, **kwargs):
     """Lazily execute declared weight transforms; requires the optional torch extra."""
     from mlac.weight_transforms import apply_weight_transformations as _apply
@@ -43,7 +49,7 @@ def apply_weight_transformations(*args, **kwargs):
 __all__ = [
     "ArchitectureDesigner", "DesignCandidate", "DesignConstraints",
     "IR_SCHEMA_VERSION", "Architecture", "Component", "TensorSpec", "IRGraphNode", "IRGraphEdge",
-    "GraphNode", "GraphEdge", "compile_architecture", "apply_modifications", "modify_model", "apply_weight_transformations",
+    "GraphNode", "GraphEdge", "compile_architecture", "apply_modifications", "modify_model", "apply_weight_transformations", "optimize_weights",
     "ParameterMapping", "InitializationStrategy", "CompatibilityConstraint",
     "RuntimeRequirements", "RuntimeCapabilities", "WeightTransformationRequirement",
     "validate_compatibility", "ModelRegistry", "ModelRecord",
