@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 import torch
 from mlac.transformer import TransformerBlock
+from mlac.modification import Modification, modify_model
 from mlac.attestation import canonical_json, directory_digests, sign_worker_result
 
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
@@ -46,6 +47,78 @@ def load_model(config: dict, state_path: Path) -> TransformerBlock:
     model.load_state_dict(load_state(state_path), strict=True)
     return model.eval()
 
+def load_candidate(config: dict, baseline_path: Path, candidate_path: Path, manifest_path: Path) -> TransformerBlock:
+    baseline = load_model(config, baseline_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"schema_version", "operation", "parameters"}
+        or isinstance(manifest.get("schema_version"), bool)
+        or manifest.get("schema_version") != 1
+        or not isinstance(manifest.get("parameters"), dict)
+    ):
+        raise ValueError("candidate_manifest.json must match schema version 1")
+    operation, params = manifest["operation"], manifest["parameters"]
+    if operation == "profile_model":
+        if set(params) - {"warmup_iterations", "measurement_iterations"}:
+            raise ValueError("profile candidate contains unsupported parameters")
+        warmup = params.get("warmup_iterations", 5)
+        iterations = params.get("measurement_iterations", 30)
+        if isinstance(warmup, bool) or not isinstance(warmup, int) or not 0 <= warmup <= 1000:
+            raise ValueError("profile warmup_iterations must be between 0 and 1000")
+        if isinstance(iterations, bool) or not isinstance(iterations, int) or not 1 <= iterations <= 1000:
+            raise ValueError("profile measurement_iterations must be between 1 and 1000")
+        candidate = baseline
+    elif operation == "prune_attention_heads":
+        if set(params) != {"module_name", "heads_to_prune"} or params["module_name"] != "attention":
+            raise ValueError("prune manifest must target only top-level attention")
+        candidate = modify_model(
+            baseline, Modification("prune_attention_heads", {"heads": params["heads_to_prune"]})
+        ).module
+    elif operation == "resize_attention_heads":
+        count = params.get("num_heads")
+        if set(params) != {"num_heads"} or isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 128:
+            raise ValueError("resize_attention_heads manifest is invalid")
+        candidate = modify_model(
+            baseline, Modification("resize_attention_heads", {"num_heads": count})
+        ).module
+    elif operation == "resize_mlp_hidden":
+        width = params.get("hidden_size")
+        if set(params) != {"hidden_size"} or isinstance(width, bool) or not isinstance(width, int) or not 1 <= width <= 65536:
+            raise ValueError("resize_mlp_hidden manifest is invalid")
+        candidate = modify_model(
+            baseline, Modification("resize_mlp_hidden", {"hidden_size": width})
+        ).module
+    elif operation == "set_mlp_activation":
+        activation = params.get("activation")
+        if set(params) != {"activation"} or activation not in {"gelu", "relu", "silu", "tanh"}:
+            raise ValueError("set_mlp_activation manifest is invalid")
+        candidate = modify_model(
+            baseline, Modification("set_mlp_activation", {"activation": activation})
+        ).module
+    elif operation == "convert_mlp_to_moe":
+        experts, top_k = params.get("num_experts"), params.get("top_k")
+        noise = params.get("expert_noise_std", 1e-3)
+        if (
+            set(params) - {"num_experts", "top_k", "expert_noise_std"}
+            or isinstance(experts, bool) or not isinstance(experts, int) or not 2 <= experts <= 32
+            or isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= experts
+            or isinstance(noise, bool) or not isinstance(noise, (int, float))
+            or not math.isfinite(noise) or not 0 <= noise <= 0.05
+        ):
+            raise ValueError("convert_mlp_to_moe manifest is invalid")
+        candidate = modify_model(
+            baseline,
+            Modification("convert_mlp_to_moe", {
+                "num_experts": experts, "top_k": top_k, "expert_noise_std": noise,
+            }),
+        ).module
+    else:
+        raise ValueError(f"unsupported candidate operation: {operation!r}")
+    candidate.load_state_dict(load_state(candidate_path), strict=True)
+    return candidate.eval()
+
+
 def benchmark(model: TransformerBlock, sample: torch.Tensor, iterations: int, warmup: int):
     with torch.inference_mode():
         for _ in range(warmup): model(sample)
@@ -69,7 +142,9 @@ def main() -> int:
     args=parser.parse_args()
     if args.candidate != "/workspace/candidate.pt" or args.trusted != "/trusted" or args.report != "/output/report.json" or args.identity_key != "/identity/worker_ed25519_private.pem":
         raise ValueError("worker paths must match the fixed mount contract")
-    candidate_path=artifact(Path("/workspace"),"candidate.pt")
+    candidate_root=Path("/workspace")
+    candidate_path=artifact(candidate_root,"candidate.pt")
+    candidate_manifest_path=artifact(candidate_root,"candidate_manifest.json")
     trusted=Path("/trusted").resolve(strict=True)
     manifest=json.loads(artifact(trusted,"manifest.json").read_text(encoding="utf-8"))
     required={"schema_version","architecture","baseline_state_dict","input_tensor","target_tensor","iterations","warmup"}
@@ -99,7 +174,7 @@ def main() -> int:
         raise ValueError("input tensor must have shape [batch, sequence, d_model]")
     if target.shape!=sample.shape: raise ValueError("regression target tensor must match input tensor shape")
     baseline=load_model(config,baseline_path)
-    candidate=load_model(config,candidate_path)
+    candidate=load_candidate(config,baseline_path,candidate_path,candidate_manifest_path)
     baseline_metrics,baseline_output=benchmark(baseline,sample,iterations,warmup)
     candidate_metrics,candidate_output=benchmark(candidate,sample,iterations,warmup)
     with torch.inference_mode():
