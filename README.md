@@ -55,7 +55,7 @@ Build the initial worker image from the repository root:
 
     docker build -f worker/Dockerfile -t mlac-worker:local .
 
-Resolve its immutable image digest and configure that digest in DockerSandboxRunner and CandidateEvaluationPipeline. The candidate directory contains candidate.pt only. A separate operator-managed trusted evaluation directory contains manifest.json, baseline.pt, input.pt, and target.pt. See worker/README.md for the manifest format.
+Resolve its immutable image digest and configure that digest in DockerSandboxRunner and CandidateEvaluationPipeline. The candidate directory contains candidate.pt and candidate_manifest.json. A separate operator-managed trusted evaluation directory contains manifest.json, baseline.pt, input.pt, and target.pt. See worker/README.md for the manifest format.
 
     from mlac.pipeline import CandidateEvaluationPipeline
     from mlac.sandbox import DockerSandboxRunner
