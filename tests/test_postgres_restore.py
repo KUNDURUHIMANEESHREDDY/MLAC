@@ -58,7 +58,7 @@ def postgres_archive_and_target(tmp_path: Path):
     if not shutil.which("pg_dump") or not shutil.which("pg_restore"):
         pytest.skip("PostgreSQL client tools are not installed")
 
-    psycopg = pytest.importorskip("psycopg")
+    pytest.importorskip("psycopg")
     from psycopg import sql
 
     parsed = urlsplit(base_url)
@@ -137,7 +137,6 @@ def test_postgres_backup_restores_into_empty_disposable_database(
     postgres_archive_and_target,
 ) -> None:
     backup, digest, target_url, target_name = postgres_archive_and_target
-    psycopg = pytest.importorskip("psycopg")
 
     result = restore_postgres_backup(backup, target_url, digest)
 
