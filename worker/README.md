@@ -58,3 +58,18 @@ Generated Python source is not imported or executed by this worker. Candidate
 code execution needs a separately reviewed harness and remains confined to
 the container boundary. The worker image itself is trusted code and must be
 built, reviewed, scanned, and pinned by digest in operator-controlled config.
+
+## Host-side output collection
+
+The writable /output mount is controlled by the worker process. The controller
+therefore does not use a check-then-read pathname walk. It opens the output root
+once, traverses relative to pinned directory descriptors, opens children with
+O_NOFOLLOW, verifies the opened inode/type, and enforces the aggregate byte
+limit while reading. Symlinks, special files, and entries changed during an
+open race are skipped; a growing file cannot exceed the configured byte limit.
+
+This host-side collector requires POSIX descriptor-relative openat and
+O_NOFOLLOW support. On hosts without those primitives (including native
+Windows Python), candidate execution fails closed rather than falling back to
+a race-prone pathname read. Use a Linux host/VM for the Docker candidate runner
+until native Windows reparse-point-safe collection is implemented.
