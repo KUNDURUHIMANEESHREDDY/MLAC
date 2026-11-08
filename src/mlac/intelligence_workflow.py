@@ -20,7 +20,8 @@ class TorchTransformerCandidateBuilder:
               output_dir: str | Path) -> Path:
         try:
             import torch
-            from mlac.transformer import TransformerBlock, prune_attention_heads
+            from mlac.modification import Modification, modify_model
+            from mlac.transformer import TransformerBlock
         except ImportError as exc:
             raise RuntimeError("Install MLAC with PyTorch: pip install 'mlac[torch]'") from exc
 
@@ -66,12 +67,31 @@ class TorchTransformerCandidateBuilder:
 
         model = TransformerBlock(**architecture).cpu().eval()
         model.load_state_dict(state, strict=True)
+        params = plan.parameters
         if plan.operation == "prune_attention_heads":
-            params = plan.parameters
             if params.get("module_name") != "attention":
-                raise ValueError("initial executor supports only the top-level 'attention' module")
-            result = prune_attention_heads(model, params.get("heads_to_prune", []))
-            model = result.module.eval()
+                raise ValueError("candidate builder supports only the top-level 'attention' module")
+            model = modify_model(
+                model,
+                Modification("prune_attention_heads", {"heads": params.get("heads_to_prune", [])}),
+            ).module.eval()
+        elif plan.operation in {
+            "resize_attention_heads", "resize_mlp_hidden", "set_mlp_activation",
+            "convert_mlp_to_moe",
+        }:
+            operation_parameters = {
+                "resize_attention_heads": {"num_heads": params["num_heads"]},
+                "resize_mlp_hidden": {"hidden_size": params["hidden_size"]},
+                "set_mlp_activation": {"activation": params["activation"]},
+                "convert_mlp_to_moe": {
+                    "num_experts": params["num_experts"],
+                    "top_k": params["top_k"],
+                    "expert_noise_std": params.get("expert_noise_std", 1e-3),
+                },
+            }[plan.operation]
+            model = modify_model(
+                model, Modification(plan.operation, operation_parameters)
+            ).module.eval()
         elif plan.operation != "profile_model":
             raise ValueError(f"no trusted candidate builder is registered for {plan.operation!r}")
 
