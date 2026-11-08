@@ -126,10 +126,10 @@ class CompatibilityConstraint:
 class RuntimeRequirements:
     backend: str | None = None
     required_features: tuple[str, ...] = ()
-    required_devices: tuple[str, ...] = ()
     required_dtypes: tuple[str, ...] = ()
     minimum_memory_bytes: int | None = None
     maximum_sequence_length: int | None = None
+    required_devices: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.backend is not None and not self.backend.strip():
