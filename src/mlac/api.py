@@ -1,7 +1,9 @@
 """Optional OIDC-authenticated FastAPI interface.
 
-The registry is process-local and non-durable. The CLI therefore refuses
-non-loopback binds even when OIDC is configured.
+Without MLAC_API_STATE_DB the registry is process-local and non-durable. The CLI
+therefore refuses non-loopback binds even when OIDC is configured. Setting
+MLAC_API_STATE_DB enables file-backed SQLite metadata persistence, but does not
+enable multi-worker or network deployment.
 """
 from __future__ import annotations
 
@@ -9,6 +11,7 @@ import os
 import time
 from collections import deque
 from dataclasses import asdict
+from sqlite3 import Error as SQLiteError
 from threading import Lock
 from typing import Any
 from urllib.parse import urlparse
@@ -22,6 +25,7 @@ from mlac.ir import Architecture
 from mlac.master_intelligence import MasterIntelligenceEngine
 from mlac.openai_backend import OpenAIProviderError, OpenAIResponsesBackend
 from mlac.registry import ModelRegistry
+from mlac.sqlite_state import SQLiteStateStore
 
 
 def _default_intelligence_engine() -> MasterIntelligenceEngine:
@@ -155,14 +159,10 @@ class _PrincipalRateLimiter:
 
             if events is None:
                 if len(self._events) >= self.max_keys:
-                    # Reclaim only identities whose entire window has expired. Never
-                    # evict an active identity, which would reset its rate allowance.
                     for existing_key, existing_events in tuple(self._events.items()):
                         if not existing_events or now - existing_events[-1] >= self.window_seconds:
                             del self._events[existing_key]
                 if len(self._events) >= self.max_keys:
-                    # A full table must not turn into unbounded memory growth or
-                    # silently evict an active principal to admit a new one.
                     raise RuntimeError(str(max(1, int(self.window_seconds))))
                 events = deque()
                 self._events[key] = events
@@ -221,6 +221,7 @@ def create_app(
     model_registry: ModelRegistry | None = None,
     evolution_controller: EvolutionController | None = None,
     intelligence_engine: MasterIntelligenceEngine | None = None,
+    state_store: SQLiteStateStore | None = None,
     jwks_client: Any | None = None,
     jwks_url: str | None = None,
     issuer: str | None = None,
@@ -242,8 +243,24 @@ def create_app(
     except ImportError as exc:
         raise RuntimeError("Install API dependencies: pip install 'mlac[api]'") from exc
 
-    model_store = model_registry if model_registry is not None else registry
-    proposal_controller = evolution_controller if evolution_controller is not None else evolution
+    if state_store is not None and (model_registry is not None or evolution_controller is not None):
+        raise ValueError("state_store cannot be combined with injected registry/controller instances")
+
+    if state_store is None and model_registry is None and evolution_controller is None:
+        database_path = os.getenv("MLAC_API_STATE_DB")
+        if database_path:
+            state_store = SQLiteStateStore(database_path)
+
+    model_store = (
+        model_registry
+        if model_registry is not None
+        else ModelRegistry(state_store=state_store) if state_store is not None else registry
+    )
+    proposal_controller = (
+        evolution_controller
+        if evolution_controller is not None
+        else EvolutionController(state_store=state_store) if state_store is not None else evolution
+    )
     planning_engine = intelligence_engine if intelligence_engine is not None else intelligence
     configured_jwks_url = jwks_url or os.getenv("MLAC_API_JWKS_URL")
     configured_issuer = issuer or os.getenv("MLAC_API_ISSUER")
@@ -276,7 +293,7 @@ def create_app(
     app.add_middleware(RequestBodyLimitMiddleware, max_bytes=max_body_bytes)
     app.add_middleware(PreAuthenticationRateLimitMiddleware, rate_limiter=peer_rate_limiter)
     app.state.auth_configured = auth_configured
-    app.state.storage_mode = "process-local"
+    app.state.storage_mode = "sqlite" if state_store is not None else "process-local"
 
     def require_principal(credentials=Depends(bearer)) -> str:
         """Verify a bearer JWT and return its issuer/subject-scoped principal."""
@@ -332,7 +349,16 @@ def create_app(
         """Report local API readiness without implying production readiness."""
         if not auth_configured:
             raise HTTPException(status_code=503, detail="OIDC authentication is not configured")
-        return {"status": "ready", "scope": "localhost-development", "storage": "process-local"}
+        if state_store is not None:
+            try:
+                state_store.health_check()
+            except (OSError, SQLiteError, RuntimeError) as exc:
+                raise HTTPException(status_code=503, detail="Configured state store is unavailable") from exc
+        return {
+            "status": "ready",
+            "scope": "localhost-development",
+            "storage": app.state.storage_mode,
+        }
 
     @app.post("/models")
     def register_model(payload: dict[str, Any], principal: str = Depends(require_principal)):
@@ -354,8 +380,7 @@ def create_app(
                 "status": record.status,
                 "created_at": record.created_at,
             }
-            for record in model_store.list()
-            if record.metadata.get("owner") == principal
+            for record in model_store.list(owner=principal)
         ]
 
     @app.get("/models/{model_id}")
@@ -403,8 +428,7 @@ def create_app(
     def list_proposals(principal: str = Depends(require_principal)):
         """List proposals associated with the authenticated principal's models."""
         owned_model_ids = {
-            record.model_id for record in model_store.list()
-            if record.metadata.get("owner") == principal
+            record.model_id for record in model_store.list(owner=principal)
         }
         return [
             proposal for proposal in proposal_controller.list_proposals()
