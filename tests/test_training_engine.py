@@ -143,6 +143,9 @@ def test_training_verifies_and_records_signed_dataset_manifest(tmp_path):
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     dataset = make_dataset()
+    dataset = TrainingDataset(
+        dataset.train, dataset.validation, dataset.heldout, revision="signed-v1",
+    )
     envelope = create_signed_dataset_manifest(
         tmp_path, dataset_id="training-corpus", revision="signed-v1",
         splits={
