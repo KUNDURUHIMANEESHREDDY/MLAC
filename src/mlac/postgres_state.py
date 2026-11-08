@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 _SCHEMA_VERSION = 1
@@ -25,8 +26,6 @@ class PostgresStateStore:
             raise RuntimeError(
                 "Install the production extra to use PostgreSQL state storage"
             ) from exc
-        import os
-
         pool_size = int(os.getenv("MLAC_API_DB_POOL_SIZE", "10"))
         if not 1 <= pool_size <= 100:
             raise ValueError("MLAC_API_DB_POOL_SIZE must be between 1 and 100")
@@ -39,7 +38,11 @@ class PostgresStateStore:
             kwargs={"connect_timeout": _CONNECT_TIMEOUT_SECONDS, "row_factory": dict_row},
             open=True,
         )
-        self._initialize()
+        try:
+            self._initialize()
+        except Exception:
+            self._pool.close()
+            raise
 
     def _connect(self):
         """Borrow a bounded-timeout PostgreSQL connection from the process pool."""
