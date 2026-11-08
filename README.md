@@ -2,7 +2,7 @@
 
 MLAC is an open-source research and engineering platform for inspecting machine-learning models, representing structure in a framework-neutral intermediate representation (MLAC-IR), and managing governed architecture-change proposals.
 
-> **Status: early MVP (v0.3.0).** This release includes MLAC-IR, an in-memory registry, optional PyTorch inspection, a small allow-listed IR metadata mutation, proposal-based evolution, governance defaults, and core tests. It does not autonomously redesign arbitrary LLMs, train models, rewrite live weights, or deploy candidates.
+> **Status: Phase 2 engineering preview.** The foundation MVP now includes an executable, explicitly supported PyTorch transformer block, attention-head pruning with weight migration, a local microbenchmark, and CI coverage. This is not arbitrary model graph surgery and does not autonomously train or promote candidates.
 
 ## Implemented
 - Framework-neutral architecture, component, and tensor representation.
@@ -12,6 +12,10 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 - Proposal-only evolution controller.
 - Default-deny production mutation policy.
 - Unit tests for core behavior.
+- Executable `TransformerBlock` with fused QKV attention.
+- Attention-head pruning that creates an isolated candidate and migrates retained Q/K/V and output-projection weights.
+- Local candidate microbenchmark for parameter count, latency, output shape, and finite outputs.
+- GitHub Actions test workflow.
 
 ## Quick start
 ```bash
@@ -32,10 +36,12 @@ snapshot = inspect_torch_model(TinyMLP(), name="tiny-mlp")
 print(snapshot.to_dict())
 ```
 
-## Safety and limitations
-- Production mutations are disabled by default.
+## Run an architecture experiment
+\n```bash\npip install -e ".[torch,dev]"\npython examples/architecture_search.py\n```\n\nSee [Phase 2 engineering notes](docs/PHASE2.md) for the supported transformation and benchmark limitations.\n\n## Safety and limitations\n- Production mutations are disabled by default.
 - Only inspect trusted, already-instantiated PyTorch modules; no untrusted checkpoint loading.
-- IR mutation is not a live neural-network topology or weight transformation.
+- Head pruning currently supports only MLAC's own `TransformerBlock`; it is not a generic Hugging Face/PyTorch model surgery adapter.
+- Head pruning structurally removes heads and migrates weights, but does not guarantee preserved task quality; task-specific evaluation is required.
+- The benchmark is a local microbenchmark, not a statistically robust quality/performance evaluation suite.
 - Candidate proposals require independent evaluation before promotion.
 - Registry and proposal state are in memory and reset on restart.
 - The optional API is unauthenticated; keep it on localhost.
