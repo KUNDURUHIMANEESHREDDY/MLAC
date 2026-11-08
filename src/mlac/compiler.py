@@ -211,6 +211,46 @@ def _topological_order(architecture: Architecture) -> tuple[list[GraphNode], dic
 
 
 
+def _initialize_parameter(parameter: Tensor, method: str, config: Mapping[str, Any]) -> None:
+    with torch.no_grad():
+        if method == "zeros":
+            nn.init.zeros_(parameter)
+        elif method == "ones":
+            nn.init.ones_(parameter)
+        elif method == "constant":
+            nn.init.constant_(parameter, float(config.get("value", 0.0)))
+        elif method == "normal":
+            nn.init.normal_(
+                parameter, mean=float(config.get("mean", 0.0)),
+                std=float(config.get("std", 1.0)),
+            )
+        elif method == "uniform":
+            nn.init.uniform_(
+                parameter, a=float(config.get("a", 0.0)),
+                b=float(config.get("b", 1.0)),
+            )
+        elif method == "xavier_uniform":
+            nn.init.xavier_uniform_(parameter, gain=float(config.get("gain", 1.0)))
+        elif method == "xavier_normal":
+            nn.init.xavier_normal_(parameter, gain=float(config.get("gain", 1.0)))
+        elif method == "kaiming_uniform":
+            nn.init.kaiming_uniform_(
+                parameter, a=float(config.get("a", 0.0)),
+                mode=str(config.get("mode", "fan_in")),
+                nonlinearity=str(config.get("nonlinearity", "leaky_relu")),
+            )
+        elif method == "kaiming_normal":
+            nn.init.kaiming_normal_(
+                parameter, a=float(config.get("a", 0.0)),
+                mode=str(config.get("mode", "fan_in")),
+                nonlinearity=str(config.get("nonlinearity", "leaky_relu")),
+            )
+        elif method == "orthogonal":
+            nn.init.orthogonal_(parameter, gain=float(config.get("gain", 1.0)))
+        else:
+            raise ValueError(f"unsupported initialization method: {method!r}")
+
+
 def _apply_initialization(compiled: CompiledArchitecture) -> None:
     parameters = dict(compiled.named_parameters())
     mappings_by_tensor: dict[str, list[ParameterMapping]] = defaultdict(list)
@@ -223,58 +263,30 @@ def _apply_initialization(compiled: CompiledArchitecture) -> None:
             raise ValueError(
                 f"initialization target {strategy.target!r} has no parameter mapping"
             )
+        targets: list[Tensor] = []
         for mapping in mappings:
             key = compiled.parameter_keys.get(mapping.parameter_name)
             if key is None or key not in parameters:
                 raise ValueError(
                     f"initialization target {strategy.target!r} is not bound to a compiled parameter"
                 )
-            parameter = parameters[key]
-            devices = [parameter.device] if parameter.device.type == "cuda" else []
-            with torch.random.fork_rng(devices=devices):
-                if strategy.seed is not None:
-                    torch.manual_seed(strategy.seed)
-                    if devices:
-                        torch.cuda.manual_seed_all(strategy.seed)
-                config = strategy.config
-                method = strategy.method.lower()
-                with torch.no_grad():
-                    if method == "zeros":
-                        nn.init.zeros_(parameter)
-                    elif method == "ones":
-                        nn.init.ones_(parameter)
-                    elif method == "constant":
-                        nn.init.constant_(parameter, float(config.get("value", 0.0)))
-                    elif method == "normal":
-                        nn.init.normal_(
-                            parameter, mean=float(config.get("mean", 0.0)),
-                            std=float(config.get("std", 1.0)),
-                        )
-                    elif method == "uniform":
-                        nn.init.uniform_(
-                            parameter, a=float(config.get("a", 0.0)),
-                            b=float(config.get("b", 1.0)),
-                        )
-                    elif method == "xavier_uniform":
-                        nn.init.xavier_uniform_(parameter, gain=float(config.get("gain", 1.0)))
-                    elif method == "xavier_normal":
-                        nn.init.xavier_normal_(parameter, gain=float(config.get("gain", 1.0)))
-                    elif method == "kaiming_uniform":
-                        nn.init.kaiming_uniform_(
-                            parameter, a=float(config.get("a", 0.0)),
-                            mode=str(config.get("mode", "fan_in")),
-                            nonlinearity=str(config.get("nonlinearity", "leaky_relu")),
-                        )
-                    elif method == "kaiming_normal":
-                        nn.init.kaiming_normal_(
-                            parameter, a=float(config.get("a", 0.0)),
-                            mode=str(config.get("mode", "fan_in")),
-                            nonlinearity=str(config.get("nonlinearity", "leaky_relu")),
-                        )
-                    elif method == "orthogonal":
-                        nn.init.orthogonal_(parameter, gain=float(config.get("gain", 1.0)))
-                    else:
-                        raise ValueError(f"unsupported initialization method: {strategy.method!r}")
+            targets.append(parameters[key])
+
+        method = strategy.method.lower()
+        if strategy.seed is None:
+            for parameter in targets:
+                _initialize_parameter(parameter, method, strategy.config)
+            continue
+
+        devices = sorted({
+            parameter.device for parameter in targets if parameter.device.type == "cuda"
+        }, key=str)
+        with torch.random.fork_rng(devices=devices):
+            torch.manual_seed(strategy.seed)
+            if devices:
+                torch.cuda.manual_seed_all(strategy.seed)
+            for parameter in targets:
+                _initialize_parameter(parameter, method, strategy.config)
 
 
 def compile_architecture(
@@ -301,10 +313,6 @@ def compile_architecture(
     if unsupported_ports:
         raise ValueError("MLAC-IR v1 compiler supports one output port per node")
     ordered, incoming = _topological_order(architecture)
-    input_order = {
-        node.node_id: index for index, node in enumerate(architecture.graph_nodes)
-        if node.operation == "input"
-    }
     raw_inputs = [node for node in architecture.graph_nodes if node.operation == "input"]
     input_indices = {
         node.node_id: int(node.attributes.get("input_index", index))
