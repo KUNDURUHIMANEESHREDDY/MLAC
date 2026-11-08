@@ -201,7 +201,11 @@ def _topological_order(architecture: Architecture) -> tuple[list[GraphNode], dic
     if len(ordered) != len(nodes):
         raise ValueError("MLAC-IR compiler does not support cyclic graphs")
     for node_id, sources in incoming.items():
-        sources.sort(key=order_index.__getitem__)
+        port_order = {
+            edge.source: (edge.target_port, order_index[edge.source])
+            for edge in architecture.graph_edges if edge.target == node_id
+        }
+        sources.sort(key=lambda source: port_order[source])
     return ordered, dict(incoming)
 
 
@@ -224,9 +228,13 @@ def compile_architecture(
             factories[name] = factory
 
     ordered, incoming = _topological_order(architecture)
+    input_order = {
+        node.node_id: index for index, node in enumerate(architecture.graph_nodes)
+        if node.operation == "input"
+    }
     input_nodes = sorted(
         (node for node in architecture.graph_nodes if node.operation == "input"),
-        key=lambda node: (int(node.attributes.get("input_index", 0)), node.node_id),
+        key=lambda node: (int(node.attributes.get("input_index", input_order[node.node_id])), input_order[node.node_id]),
     )
     if not input_nodes:
         raise ValueError("compiled architecture requires at least one input node")
@@ -284,6 +292,9 @@ def compile_architecture(
     dangling = set(parameter_keys) - declared if declared else set()
     if dangling:
         raise ValueError(f"parameter bindings have no IR mapping: {', '.join(sorted(dangling))}")
+    unbound = declared - set(parameter_keys)
+    if unbound:
+        raise ValueError(f"IR parameters are not bound to compiled nodes: {', '.join(sorted(unbound))}")
 
     return CompiledArchitecture(
         architecture, compiled_nodes, modules, incoming,
