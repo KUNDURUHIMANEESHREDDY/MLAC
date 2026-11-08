@@ -349,8 +349,8 @@ def compile_architecture(
 
     outputs = architecture.metadata.get("outputs")
     if outputs is None:
-        targets = {edge.target for edge in architecture.graph_edges}
-        output_nodes = [node.node_id for node in architecture.graph_nodes if node.node_id not in targets]
+        sources = {edge.source for edge in architecture.graph_edges}
+        output_nodes = [node.node_id for node in architecture.graph_nodes if node.node_id not in sources]
     else:
         if not isinstance(outputs, (list, tuple)) or not outputs:
             raise ValueError("metadata.outputs must be a non-empty list of node ids")
