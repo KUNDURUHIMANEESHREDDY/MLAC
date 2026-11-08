@@ -27,6 +27,11 @@ def test_controller_evolution_ledger_is_durable_and_append_only(tmp_path):
     assert ledger.list(model_id="mlac-controller-local")[0]["run_id"] == "run-1"
     with pytest.raises(sqlite3.IntegrityError):
         ledger.append(result)
+    with sqlite3.connect(ledger.database) as db:
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            db.execute("UPDATE controller_evolution_runs SET model_id='rewritten' WHERE run_id='run-1'")
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            db.execute("DELETE FROM controller_evolution_runs WHERE run_id='run-1'")
 
 
 def test_self_evolution_workflow_uses_trusted_experiment_workflow_and_never_promotes(tmp_path):
