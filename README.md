@@ -111,6 +111,20 @@ See docs/ARCHITECTURE.md and docs/PHASE4.md through docs/PHASE7.md.
 4. Provider-independent master intelligence and experiment planning.
 5. Recursive controller evaluation with immutable recovery and authorization boundaries.
 
+## Signed dataset manifests
+
+MLAC includes an Ed25519-signed dataset manifest utility. It records exact
+file-level SHA-256 digests, byte lengths, and train/validation/test split
+membership. Verification checks the trusted signer, signature, path safety,
+split consistency, and every dataset file's bytes. See
+[docs/DATASET_MANIFESTS.md](docs/DATASET_MANIFESTS.md) for creation and
+verification examples.
+
+This is a provenance primitive: it is not yet automatically enforced by every
+training/evaluation workflow. Dataset licensing, contamination controls,
+semantic preprocessing consistency, and benchmark suitability remain
+operator responsibilities.
+
 ## License
 
 Apache-2.0. See LICENSE.
