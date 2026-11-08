@@ -13,6 +13,7 @@ on:
       - "src/mlac/ir.py"
       - "src/mlac/registry.py"
       - "src/mlac/transformer.py"
+      - "src/mlac/modification.py"
       - "src/mlac/attestation.py"
       - "src/mlac/lm_evaluation.py"
 
@@ -213,6 +214,108 @@ jobs:
               "perplexity_candidate": report["quality_candidate"]["perplexity"],
               "reasoning_accuracy_baseline": report["quality_baseline"]["reasoning_accuracy"],
               "reasoning_accuracy_candidate": report["quality_candidate"]["reasoning_accuracy"],
+          }, sort_keys=True))
+          PY
+
+      - name: Verify signed structural-modification worker report
+        env:
+          IMAGE: ghcr.io/kunduruhimaneeshreddy/mlac-worker
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          IMAGE_REF="$IMAGE@$DIGEST"
+          ROOT="$(mktemp -d)"
+          trap 'rm -rf "$ROOT"' EXIT
+          mkdir -p "$ROOT/candidate" "$ROOT/trusted" "$ROOT/identity" "$ROOT/output"
+          chmod 0777 "$ROOT/candidate" "$ROOT/trusted" "$ROOT/identity" "$ROOT/output"
+
+          docker run --rm -i --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=128 --memory=1g --cpus=2 \
+            --user 65532:65532 --tmpfs /tmp:rw,nosuid,nodev,size=128m \
+            -e HOME=/tmp -v "$ROOT/candidate:/workspace" \
+            -v "$ROOT/trusted:/trusted" -v "$ROOT/identity:/identity" \
+            --entrypoint python "$IMAGE_REF" - <<'PY'
+          import json, torch
+          from pathlib import Path
+          from mlac.attestation import generate_worker_keypair
+          from mlac.modification import Modification, modify_model
+          from mlac.transformer import TransformerBlock
+
+          torch.manual_seed(2026)
+          config = {"d_model": 16, "num_heads": 4, "mlp_ratio": 2, "dropout": 0.0}
+          baseline = TransformerBlock(**config).eval()
+          torch.save(baseline.state_dict(), "/trusted/baseline.pt")
+          candidate = modify_model(
+              baseline, Modification("resize_mlp_hidden", {"hidden_size": 24})
+          ).module.eval()
+          torch.save(candidate.state_dict(), "/workspace/candidate.pt")
+          Path("/workspace/candidate_manifest.json").write_text(json.dumps({
+              "schema_version": 1,
+              "operation": "resize_mlp_hidden",
+              "parameters": {"hidden_size": 24},
+          }), encoding="utf-8")
+          sample = torch.randn(2, 5, 16)
+          target = torch.randn(2, 5, 16)
+          torch.save(sample, "/trusted/input.pt")
+          torch.save(target, "/trusted/target.pt")
+          Path("/trusted/manifest.json").write_text(json.dumps({
+              "schema_version": 1,
+              "architecture": config,
+              "baseline_state_dict": "baseline.pt",
+              "input_tensor": "input.pt",
+              "target_tensor": "target.pt",
+              "iterations": 2,
+              "warmup": 0,
+          }), encoding="utf-8")
+          generate_worker_keypair(
+              "/identity/worker_ed25519_private.pem",
+              "/trusted/worker_ed25519_public.pem",
+          )
+          PY
+
+          docker run --rm -i --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=128 --memory=1g --cpus=2 \
+            --user 65532:65532 --tmpfs /tmp:rw,nosuid,nodev,size=128m \
+            -e HOME=/tmp -v "$ROOT/candidate:/workspace:ro" \
+            -v "$ROOT/trusted:/trusted:ro" -v "$ROOT/identity:/identity:ro" \
+            -v "$ROOT/output:/output:rw" "$IMAGE_REF" \
+            /opt/mlac-worker/evaluate --candidate /workspace/candidate.pt \
+            --trusted /trusted --report /output/report.json \
+            --identity-key /identity/worker_ed25519_private.pem \
+            --worker-id ci-modification-worker --worker-image "$IMAGE_REF"
+
+          docker run --rm -i --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=64 --memory=1g --cpus=1 \
+            --user 65532:65532 --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            -e HOME=/tmp -v "$ROOT/candidate:/workspace:ro" \
+            -v "$ROOT/trusted:/trusted:ro" -v "$ROOT/output:/output:ro" \
+            --entrypoint python "$IMAGE_REF" - "$IMAGE_REF" <<'PY'
+          import json, sys
+          from pathlib import Path
+          from mlac.attestation import canonical_json, directory_digests, verify_worker_result
+
+          image_ref = sys.argv[1]
+          envelope = json.loads(Path("/output/report.json").read_text(encoding="utf-8"))
+          report = envelope["report"]
+          verified = verify_worker_result(
+              attestation=envelope["attestation"],
+              report_bytes=canonical_json(report),
+              artifact_sha256=directory_digests("/workspace", "/trusted"),
+              trusted_worker_keys={
+                  envelope["attestation"]["key_id"]:
+                      Path("/trusted/worker_ed25519_public.pem").read_bytes()
+              },
+              expected_image=image_ref,
+              expected_worker_id="ci-modification-worker",
+          )
+          assert report["candidate"]["finite_output"]
+          assert report["candidate"]["parameter_count"] < report["baseline"]["parameter_count"]
+          print(json.dumps({
+              "signature_verified": True,
+              "operation": "resize_mlp_hidden",
+              "candidate_parameters": report["candidate"]["parameter_count"],
+              "baseline_parameters": report["baseline"]["parameter_count"],
+              "worker_id": verified["worker_id"],
           }, sort_keys=True))
           PY
 
