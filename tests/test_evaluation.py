@@ -16,6 +16,7 @@ def test_evaluation_requires_task_quality_before_promotion():
     result = evaluate_candidate(
         baseline, candidate, sample,
         quality_evaluator=lambda model, x: {"score": 0.8},
+        policy=EvaluationPolicy(max_latency_regression_ratio=1000),
         iterations=2, warmup=1,
     )
     assert result.checks["quality_evaluated"]
