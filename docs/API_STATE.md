@@ -13,20 +13,20 @@ both fails startup. If neither is set, the API uses process-local state and is
 not suitable for production. The `/ready` response reports `storage: postgres`,
 `storage: sqlite`, or `storage: process-local`; it never returns a database URL or path.
 
-The store creates missing parent directories and a new database file. On POSIX,
-the new file is created with mode `0600`; newly created directories request
-mode `0700`. Windows operators must apply an ACL that limits access to the
-service identity because `chmod` does not provide equivalent Windows ACL
-semantics. Keep the database on a local filesystem with reliable SQLite locking;
-do not place it on an unverified network share.
+For SQLite only, the store creates missing parent directories and a new database
+file. On POSIX, the new file is created with mode `0600`; newly created
+directories request mode `0700`. Windows operators must apply an ACL that limits
+access to the service identity because `chmod` does not provide equivalent
+Windows ACL semantics. Keep SQLite on a local filesystem with reliable locking.
 
 ## PostgreSQL production backend
 
 The PostgreSQL store applies schema version 1 transactionally under a
 PostgreSQL advisory lock. It uses parameterized statements, a principal owner
 index, a model foreign key with proposal cascade deletion, bounded connection
-timeouts, and fail-closed readiness. It supports multiple API processes sharing
-the same database. PostgreSQL credentials must be supplied through a secret
+timeouts, a configurable per-process connection pool (MLAC_API_DB_POOL_SIZE,
+default 10), and fail-closed readiness. It supports multiple API processes
+sharing the same database. PostgreSQL credentials must be supplied through a secret
 manager or private environment file; use TLS (`sslmode=require`) for remote
 managed databases. Do not publish the database port.
 
@@ -48,10 +48,11 @@ Both stores persist metadata only. Model weights, candidate bundles,
 attestations, and content-addressed artifacts remain in their existing
 artifact/worker boundaries. JSON values are encoded with non-finite numbers rejected.
 
-The initial schema migration is transactional and sets `PRAGMA user_version=1`.
-A database with a newer schema version fails closed at startup; the application
-does not attempt a downgrade or destructive migration. Future schema changes
-must use a new explicit, tested migration.
+The SQLite schema migration is transactional and sets `PRAGMA user_version=1`;
+the PostgreSQL backend uses a schema-version table and transaction-scoped
+advisory lock. A database with a newer schema version fails closed at startup;
+the application does not attempt a downgrade or destructive migration. Future
+schema changes must use a new explicit, tested migration.
 
 ## Backup and restore
 
