@@ -293,6 +293,13 @@ class Architecture:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Architecture":
         """Load current IR and legacy v1 payloads that contain only core fields."""
+        runtime_requirements = dict(data.get("runtime_requirements") or {})
+        for field_name in ("required_features", "required_dtypes", "required_devices"):
+            values = runtime_requirements.get(field_name, ())
+            if not isinstance(values, (list, tuple)):
+                raise TypeError(f"runtime_requirements.{field_name} must be a sequence")
+            runtime_requirements[field_name] = tuple(values)
+
         return cls(
             name=data["name"],
             family=data["family"],
@@ -310,7 +317,7 @@ class Architecture:
             ),
             initialization=tuple(InitializationStrategy(**item) for item in data.get("initialization", ())),
             compatibility_constraints=tuple(CompatibilityConstraint(**item) for item in data.get("compatibility_constraints", ())),
-            runtime_requirements=RuntimeRequirements(**data.get("runtime_requirements", {})),
+            runtime_requirements=RuntimeRequirements(**runtime_requirements),
             weight_transformations=tuple(
                 WeightTransformationRequirement(**{
                     **item,
