@@ -17,14 +17,20 @@ except ImportError as exc:
 
 class PrunableSelfAttention(nn.Module):
     """Batch-first self-attention with a fused QKV projection."""
-    def __init__(self, d_model: int, num_heads: int, bias: bool = True):
+    def __init__(self, d_model: int, num_heads: int, bias: bool = True, head_dim: int | None = None):
         super().__init__()
-        if d_model <= 0 or num_heads <= 0 or d_model % num_heads:
-            raise ValueError("d_model must be positive and divisible by num_heads")
-        self.d_model, self.num_heads = int(d_model), int(num_heads)
-        self.head_dim = self.d_model // self.num_heads
-        self.qkv = nn.Linear(self.d_model, 3 * self.d_model, bias=bias)
-        self.out_proj = nn.Linear(self.d_model, self.d_model, bias=bias)
+        if d_model <= 0 or num_heads <= 0:
+            raise ValueError("d_model and num_heads must be positive")
+        if head_dim is None:
+            if d_model % num_heads:
+                raise ValueError("d_model must be divisible by num_heads when head_dim is omitted")
+            head_dim = d_model // num_heads
+        if head_dim <= 0:
+            raise ValueError("head_dim must be positive")
+        self.d_model, self.num_heads, self.head_dim = int(d_model), int(num_heads), int(head_dim)
+        self.inner_dim = self.num_heads * self.head_dim
+        self.qkv = nn.Linear(self.d_model, 3 * self.inner_dim, bias=bias)
+        self.out_proj = nn.Linear(self.inner_dim, self.d_model, bias=bias)
 
     def forward(self, x: Tensor, *, causal: bool = False) -> Tensor:
         if x.ndim != 3 or x.shape[-1] != self.d_model:
@@ -37,7 +43,7 @@ class PrunableSelfAttention(nn.Module):
             mask = torch.ones(seq, seq, dtype=torch.bool, device=x.device).triu(1)
             mask = ~mask
         attended = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask)
-        merged = attended.transpose(1, 2).contiguous().view(batch, seq, self.d_model)
+        merged = attended.transpose(1, 2).contiguous().view(batch, seq, self.inner_dim)
         return self.out_proj(merged)
 
 
@@ -98,7 +104,8 @@ def prune_attention_heads(block: TransformerBlock, heads_to_remove: Iterable[int
         raise ValueError("at least one attention head must remain")
 
     candidate = deepcopy(block)
-    new_attention = PrunableSelfAttention(old.d_model, len(retained), bias=old.qkv.bias is not None)
+    new_attention = PrunableSelfAttention(old.d_model, len(retained), bias=old.qkv.bias is not None,
+                                          head_dim=old.head_dim)
     new_attention = new_attention.to(device=old.qkv.weight.device, dtype=old.qkv.weight.dtype)
     head_indices = torch.tensor(
         [h * old.head_dim + offset for h in retained for offset in range(old.head_dim)],
