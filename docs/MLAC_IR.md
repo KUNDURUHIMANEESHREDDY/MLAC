@@ -18,7 +18,7 @@ Transformers dependency.
 | Checkpoint mapping | `ParameterMapping` | Map framework parameter/checkpoint keys to IR tensors |
 | Initialization | `InitializationStrategy` | Describe initialization method, parameters, and optional seed |
 | Compatibility | `CompatibilityConstraint` | Express runtime predicates with error or warning severity |
-| Runtime contract | `RuntimeRequirements`, `RuntimeCapabilities` | Compare declared needs against an available execution target |
+| Runtime contract | `RuntimeRequirements`, `RuntimeCapabilities` | Compare backend, features, devices, dtypes, memory and context needs against an execution target |
 | Weight migration | `WeightTransformationRequirement` | Declare source/target parameters and required transformations |
 
 The IR remains framework-neutral, while optional PyTorch adapters make a
@@ -75,6 +75,7 @@ architecture = Architecture(
     runtime_requirements=RuntimeRequirements(
         backend="pytorch",
         required_features=("bf16",),
+        required_devices=("cuda",),
         required_dtypes=("bf16",),
     ),
 )
@@ -97,8 +98,8 @@ assert validate_compatibility(architecture, runtime) == ()
 - `Architecture.assert_valid()` raises `ValueError` when structural errors
   exist.
 - `validate_compatibility(architecture, runtime)` checks the declared
-  backend, required runtime features, supported dtypes, memory floor, sequence
-  length, and explicit compatibility predicates. It returns a tuple of issues.
+  backend, required runtime features and devices, supported dtypes, memory floor,
+  sequence length, and explicit compatibility predicates. It returns a tuple of issues.
   Warning-severity predicates are prefixed with `warning:`; callers must not
   treat warnings as hard failures.
 - A missing runtime measurement does not count as satisfying a minimum memory
