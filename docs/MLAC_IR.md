@@ -5,7 +5,8 @@ inspector, mutation engine, weight tooling, and runtime adapters. It describes
 what a model is independently of the framework that created it.
 
 The Python implementation is in `src/mlac/ir.py`. It has no PyTorch or
-Transformers dependency.
+Transformers dependency. The machine-readable JSON Schema is published at
+`schemas/mlac-ir-v1.schema.json` (JSON Schema Draft 2020-12).
 
 ## Schema coverage
 
