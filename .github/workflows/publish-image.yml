@@ -1,24 +1,54 @@
 name: publish-production-container
 
 on:
-  push:
+  workflow_run:
+    workflows: ["tests", "CodeQL"]
+    types: [completed]
     branches: [main]
-  workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   packages: write
 
 concurrency:
-  group: mlac-container-${{ github.ref }}
-  cancel-in-progress: true
+  group: mlac-container-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
 
 jobs:
   build-and-publish:
+    # workflow_run is privileged: publish only after a push to main, never a PR or
+    # a scheduled/manual analysis. The gate below also requires both exact-SHA runs.
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Check out main
+      - name: Check out the exact verified commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Require successful tests and CodeQL for this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow in tests.yml codeql.yml; do
+            response="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?head_sha=${EXPECTED_SHA}&per_page=100")"
+            conclusion="$(jq -r --arg sha "${EXPECTED_SHA}" '
+              [.workflow_runs[]
+                | select(.head_sha == $sha and .event == "push" and .head_branch == "main")]
+              | sort_by(.updated_at)
+              | last
+              | .conclusion // empty
+            ' <<< "$response")"
+            if [[ "$conclusion" != "success" ]]; then
+              echo "::error::Refusing to publish ${EXPECTED_SHA}: latest ${workflow} result is '${conclusion:-missing}', expected success."
+              exit 1
+            fi
+          done
 
       - name: Normalize image name
         id: image
@@ -35,13 +65,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish main image
+      - name: Build and publish verified main image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:main
-            ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+            ${{ steps.image.outputs.name }}:sha-${{ github.event.workflow_run.head_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
