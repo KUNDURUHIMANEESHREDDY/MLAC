@@ -1,6 +1,7 @@
 """Integration tests for the tenant-scoped PostgreSQL state backend."""
 
 import os
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -102,3 +103,15 @@ def test_sqlite_migration_copies_models_and_proposals_transactionally(tmp_path):
         migrated.remove(model.model_id)
     finally:
         target.close()
+
+
+
+def test_postgres_json_object_rejects_non_object_json() -> None:
+    with pytest.raises(TypeError, match="must be a JSON object"):
+        PostgresStateStore._json_object("[]", field="model metadata")
+
+
+def test_postgres_insert_model_rejects_non_string_owner() -> None:
+    store = PostgresStateStore.__new__(PostgresStateStore)
+    with pytest.raises(TypeError, match="model owner must be a string"):
+        store.insert_model(SimpleNamespace(metadata={"owner": 42}))
