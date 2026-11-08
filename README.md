@@ -78,6 +78,7 @@ The pipeline can authorize only a candidate operation. It does not deploy or pro
 - Docker is not a complete defense against a compromised host, kernel, daemon, or runtime. Use a dedicated worker VM/host and stronger isolation for hostile code.
 - The optional API is unauthenticated; keep it on localhost.
 - Trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
+- Host-side sandbox output collection uses descriptor-relative no-follow traversal and fails closed without POSIX openat/O_NOFOLLOW support; native Windows candidate evaluation is not yet supported.
 
 See docs/ARCHITECTURE.md and docs/PHASE4.md through docs/PHASE7.md.
 
