@@ -141,3 +141,35 @@ The engine combines deterministic architecture diagnosis with provider-suggested
 Plans are deduplicated and ranked by estimated value × feasibility × risk weight (low: 1.0, medium: 0.85, high: 0.6), with feasibility and estimated value as deterministic tie-breakers. The report explains the top-ranked proposal. These scores are prioritization heuristics, not calibrated probabilities or evidence of model improvement.
 
 The planner remains proposal-only. It does not execute LLM-generated code, change policy, select arbitrary tools, deploy models, or promote candidates. Candidate construction is still restricted to the reviewed builder operations and every experiment must pass through the digest-pinned worker, signed-report verification, controller evaluation policy, and governance gates.
+
+
+## Recursive controller self-evolution
+
+The `ControllerSelfEvolutionWorkflow` runs the same bounded plan/build/verify/evaluate path against an operator-designated controller model. Use it only when the controller model is locally accessible/open-weight; provider-managed API model internals cannot be modified by MLAC.
+
+```python
+from mlac.self_evolution import (
+    ControllerEvolutionLedger,
+    ControllerSelfEvolutionWorkflow,
+)
+
+recursive = ControllerSelfEvolutionWorkflow(
+    intelligence_workflow=workflow,
+    ledger=ControllerEvolutionLedger("mlac-controller-evolution.sqlite3"),
+)
+result = recursive.run(
+    controller_model_id="mlac-controller-local",
+    architecture=controller_architecture,
+    objective="Improve held-out planning accuracy without exceeding latency budgets",
+    trusted_evaluation_dir="./controller-evaluation-bundle",
+    max_experiments=2,
+)
+print(result.to_dict())
+```
+
+Each cycle persists its architecture fingerprint, proposals, candidate outcomes,
+and candidate-authorized IDs. The ledger blocks UPDATE and DELETE operations.
+"Candidate authorized" means only that the existing governance kernel permitted
+the candidate operation; it does not mean the candidate is active. Promotion,
+controller code changes, and changes to authorization, governance, recovery,
+or deployment trust roots remain separate operator-controlled operations.
