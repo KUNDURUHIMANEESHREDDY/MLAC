@@ -9,6 +9,8 @@ from mlac.evolution import EvolutionController
 from mlac.ir import Architecture, Component
 from mlac.postgres_state import PostgresStateStore
 from mlac.registry import ModelRegistry
+from mlac.sqlite_state import SQLiteStateStore
+from scripts.migrate_sqlite_to_postgres import migrate
 
 
 def _architecture():
@@ -65,3 +67,38 @@ def test_postgres_state_persists_and_scopes_models_and_proposals():
     reopened_registry.remove(bob.model_id)
     store.close()
     reopened.close()
+
+
+def test_sqlite_migration_copies_models_and_proposals_transactionally(tmp_path):
+    """Migrate a SQLite snapshot into an empty PostgreSQL database."""
+    dsn = os.getenv("MLAC_TEST_POSTGRES_URL")
+    if not dsn:
+        pytest.skip("MLAC_TEST_POSTGRES_URL is not configured")
+
+    source = SQLiteStateStore(tmp_path / "legacy.sqlite3")
+    registry = ModelRegistry(state_store=source)
+    controller = EvolutionController(state_store=source)
+    owner = f"migration-{uuid4().hex}"
+    model = registry.register(_architecture(), metadata={"owner": owner})
+    proposal = controller.propose(
+        model.model_id,
+        model.architecture,
+        hypothesis="Legacy proposal",
+        operation="dropout",
+        parameters={"probability": 0.2},
+    )
+
+    model_count, proposal_count = migrate(str(tmp_path / "legacy.sqlite3"), dsn)
+    assert (model_count, proposal_count) == (1, 1)
+
+    target = PostgresStateStore(dsn)
+    try:
+        migrated = ModelRegistry(state_store=target)
+        migrated_controller = EvolutionController(state_store=target)
+        assert migrated.get(model.model_id).metadata["owner"] == owner
+        assert migrated_controller.list_proposals(
+            owner=owner, model_ids={model.model_id}
+        )[0]["proposal_id"] == proposal.proposal_id
+        migrated.remove(model.model_id)
+    finally:
+        target.close()
