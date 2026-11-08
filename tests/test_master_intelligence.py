@@ -74,3 +74,63 @@ def test_rejects_invalid_pruning_indices_from_backend():
     with pytest.raises(ValueError, match="non-negative"):
         MasterIntelligenceEngine(backend=CallableReasoningBackend(provider)).plan(
             model_id="m", architecture=sample_architecture(), objective="reduce latency")
+
+
+def test_rejects_non_finite_objective_constraints():
+    engine = MasterIntelligenceEngine()
+    with pytest.raises(ValueError, match="finite number"):
+        engine.plan(
+            model_id="m",
+            architecture=sample_architecture(),
+            objective="reduce latency",
+            constraints={"max_latency_regression_ratio": float("nan")},
+        )
+
+
+def test_profile_plan_parameters_are_bounded_and_allowlisted():
+    def provider(**kwargs):
+        return [{
+            "operation": "profile_model",
+            "parameters": {"measurement_iterations": 1000000},
+            "hypothesis": "Profile carefully",
+            "rationale": "A bounded profile is required.",
+            "expected_effect": {"latency": "measured"},
+            "falsification_criteria": ["Measurements are unstable"],
+            "risk": "low",
+            "estimated_value": 0.5,
+            "feasibility": 0.9,
+        }]
+    with pytest.raises(ValueError, match="measurement_iterations"):
+        MasterIntelligenceEngine(backend=CallableReasoningBackend(provider)).plan(
+            model_id="m", architecture=sample_architecture(), objective="reduce latency"
+        )
+
+
+def test_decision_ranking_penalizes_risk_after_value_and_feasibility():
+    def provider(**kwargs):
+        proposals = []
+        for head, risk in ((0, "high"), (1, "low")):
+            proposals.append({
+                "operation": "prune_attention_heads",
+                "parameters": {"module_name": "encoder.attn", "heads_to_prune": [head]},
+                "hypothesis": f"Prune head {head}",
+                "rationale": "Compare isolated head ablations.",
+                "expected_effect": {"latency": "measure", "quality": "measure"},
+                "falsification_criteria": ["Quality regresses"],
+                "risk": risk,
+                "estimated_value": 0.8,
+                "feasibility": 0.8,
+            })
+        return proposals
+
+    report = MasterIntelligenceEngine(
+        backend=CallableReasoningBackend(provider), max_plans=5
+    ).plan(model_id="m", architecture=sample_architecture(), objective="reduce latency")
+    low_risk = next(i for i, plan in enumerate(report.plans)
+                    if plan.operation == "prune_attention_heads"
+                    and plan.parameters["heads_to_prune"] == [1])
+    high_risk = next(i for i, plan in enumerate(report.plans)
+                     if plan.operation == "prune_attention_heads"
+                     and plan.parameters["heads_to_prune"] == [0])
+    assert low_risk < high_risk
+    assert "Top-ranked proposal:" in report.reasoning_summary
