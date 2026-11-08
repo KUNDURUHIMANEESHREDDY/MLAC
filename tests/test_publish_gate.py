@@ -27,6 +27,11 @@ def successful_checks() -> dict:
     return {"check_runs": [check(name) for name in REQUIRED_CHECKS]}
 
 
+def test_gate_requires_the_codeql_aggregate_and_both_language_analyses() -> None:
+    """The aggregate and both default-setup language analyses are required."""
+    assert REQUIRED_CHECKS == ("pytest", "CodeQL", "Analyze (python)", "Analyze (actions)")
+
+
 def test_gate_accepts_only_complete_successful_required_checks_for_exact_sha() -> None:
     """All required check runs must succeed on the requested commit."""
     assert evaluate_check_runs(successful_checks(), EXPECTED_SHA) == ("success", [])
