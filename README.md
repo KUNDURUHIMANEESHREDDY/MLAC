@@ -75,6 +75,9 @@ Resolve its immutable image digest and configure that digest in DockerSandboxRun
         image=image,
         store=ExperimentStore("mlac-experiments.sqlite3"),
         trusted_worker_keys={key_id: trusted_public_key},
+        trusted_dataset_signers={
+            "dataset-release-prod": Path("/etc/mlac/trust/dataset-release-prod.pem").read_bytes(),
+        },
         worker_identity_dir=worker_identity_dir,
         artifact_registry=ArtifactRegistry("./mlac-artifacts"),
     )
