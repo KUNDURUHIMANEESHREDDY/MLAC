@@ -143,9 +143,9 @@ def test_postgres_backup_restores_into_empty_disposable_database(
     psycopg = pytest.importorskip("psycopg")
     target = parse_postgres_target(target_url)
     real_run = subprocess.run
+    restore_commands: list[list[str]] = []
 
-    def capture_restore_error(*args, **kwargs):
-        result = real_run(*args, **kwargs)
+    def capture_restore_command(*args, **kwargs):
         command = args[0]
         if (
             isinstance(command, list)
@@ -153,19 +153,19 @@ def test_postgres_backup_restores_into_empty_disposable_database(
             and Path(command[0]).name == "pg_restore"
             and "--list" not in command
         ):
-            # verify_backup uses pg_restore --list only to inspect the archive TOC;
-            # only the subsequent restore invocation must name the target database.
-            assert "--dbname" in command
-            assert command[command.index("--dbname") + 1] == target.database
-            assert target.password not in " ".join(command)
-            if result.returncode != 0:
-                diagnostic = (result.stderr or "").replace(target.password, "[redacted]")
-                print(f"synthetic PostgreSQL restore diagnostic: {diagnostic[:1000]}")
-        return result
+            # verify_backup uses pg_restore --list for archive inspection; capture
+            # only the separate invocation that executes the restore transaction.
+            restore_commands.append(command)
+        return real_run(*args, **kwargs)
 
-    monkeypatch.setattr(restore_module.subprocess, "run", capture_restore_error)
+    monkeypatch.setattr(restore_module.subprocess, "run", capture_restore_command)
     result = restore_postgres_backup(backup, target_url, digest)
 
+    assert len(restore_commands) == 1
+    restore_command = restore_commands[0]
+    assert "--dbname" in restore_command
+    assert restore_command[restore_command.index("--dbname") + 1] == target.database
+    assert target.password not in " ".join(restore_command)
     assert result["format"] == "postgres-custom"
     assert result["sha256"] == digest
     assert result["database"] == target_name
