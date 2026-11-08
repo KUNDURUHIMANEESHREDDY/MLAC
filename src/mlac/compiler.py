@@ -435,7 +435,12 @@ def compile_architecture(
                         f"compiled parameter {parameter_name!r} shape {tuple(parameter.shape)} "
                         f"does not match tensor contract {spec.shape}"
                     )
-            if mapping.shape and tuple(mapping.shape) != tuple(parameter.shape):
+            if mapping.shape and (
+                len(mapping.shape) != parameter.ndim or any(
+                    isinstance(expected, int) and actual != expected
+                    for actual, expected in zip(parameter.shape, mapping.shape)
+                )
+            ):
                 raise ValueError(
                     f"compiled parameter {parameter_name!r} shape {tuple(parameter.shape)} "
                     f"does not match mapping shape {mapping.shape}"
