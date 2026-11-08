@@ -164,3 +164,19 @@ def test_cli_allows_only_loopback_bind_hosts():
     assert is_loopback_host("localhost")
     assert not is_loopback_host("0.0.0.0")
     assert not is_loopback_host("192.0.2.10")
+
+
+
+def test_intelligence_planning_route_requires_identity_and_returns_proposals():
+    client, token = make_client()
+    payload = {
+        "model_id": "baseline-001",
+        "architecture": architecture(),
+        "objective": "Reduce inference latency by 20%",
+        "constraints": {"max_latency_regression_ratio": 0.0},
+    }
+    assert client.post("/intelligence/plan", json=payload).status_code == 401
+    response = client.post("/intelligence/plan", headers=auth(token("alice")), json=payload)
+    assert response.status_code == 200
+    assert response.json()["planner"] == "rules"
+    assert response.json()["plans"]

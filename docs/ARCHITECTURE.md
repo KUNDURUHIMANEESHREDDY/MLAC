@@ -11,6 +11,7 @@ MLAC separates model metadata, supported transformations, evaluation evidence, e
 - **Experiment ledger:** SQLite stores immutable evaluation scorecards and workflow outcomes.
 - **Artifact registry:** content-addressed SHA-256 blobs with SQLite evaluation associations, integrity checks, and one-time worker-attestation nonce records.
 - **Worker identity:** Ed25519 result signatures bind canonical report bytes, configured worker identity/image claim, and controller-recomputed input artifact hashes. Public keys are pinned in controller trust configuration; private keys are mounted read-only only into the fixed worker.
+- **Master Intelligence:** normalizes objectives, diagnoses architecture metadata and ranks validated proposal-only experiment plans; optional LLM suggestions are untrusted and allowlisted.
 - **Evolution:** records hypotheses as proposals; it does not independently execute generated code or promote deployments.
 - **Safety kernel:** integrity-checks trusted guardrails, permits only monotonic tightening, and requires externally pinned policy digests and scoped operator approval for production authorization.
 - **Sandbox runner:** digest-pinned Docker execution with read-only candidate input, separate output, disabled network, dropped capabilities, non-root identity, and resource/time controls.

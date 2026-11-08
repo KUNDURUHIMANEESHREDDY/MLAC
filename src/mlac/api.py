@@ -15,10 +15,12 @@ from urllib.parse import urlparse
 
 from mlac.evolution import EvolutionController
 from mlac.ir import Architecture
+from mlac.master_intelligence import MasterIntelligenceEngine
 from mlac.registry import ModelRegistry
 
 registry = ModelRegistry()
 evolution = EvolutionController()
+intelligence = MasterIntelligenceEngine()
 _MAX_REQUEST_BODY_BYTES = 1_048_576
 
 
@@ -116,6 +118,7 @@ def create_app(
     *,
     model_registry: ModelRegistry | None = None,
     evolution_controller: EvolutionController | None = None,
+    intelligence_engine: MasterIntelligenceEngine | None = None,
     jwks_client: Any | None = None,
     jwks_url: str | None = None,
     issuer: str | None = None,
@@ -135,6 +138,7 @@ def create_app(
 
     model_store = model_registry if model_registry is not None else registry
     proposal_controller = evolution_controller if evolution_controller is not None else evolution
+    planning_engine = intelligence_engine if intelligence_engine is not None else intelligence
     configured_jwks_url = jwks_url or os.getenv("MLAC_API_JWKS_URL")
     configured_issuer = issuer or os.getenv("MLAC_API_ISSUER")
     configured_audience = audience or os.getenv("MLAC_API_AUDIENCE")
@@ -278,6 +282,33 @@ def create_app(
             proposal for proposal in proposal_controller.list_proposals()
             if proposal.get("model_id") in owned_model_ids
         ]
+
+    @app.post("/intelligence/plan")
+    def intelligence_plan(
+        payload: dict[str, Any],
+        _principal: str = Depends(require_principal),
+    ):
+        model_id = payload.get("model_id")
+        architecture = payload.get("architecture")
+        objective = payload.get("objective")
+        constraints = payload.get("constraints")
+        if (
+            not isinstance(model_id, str)
+            or not isinstance(architecture, dict)
+            or not isinstance(objective, str)
+            or (constraints is not None and not isinstance(constraints, dict))
+        ):
+            raise HTTPException(status_code=422, detail="Planning request fields have invalid types")
+        try:
+            report = planning_engine.plan(
+                model_id=model_id,
+                architecture=architecture,
+                objective=objective,
+                constraints=constraints,
+            )
+            return report.to_dict()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Planning request is invalid") from exc
 
     return app
 

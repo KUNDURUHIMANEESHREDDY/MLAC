@@ -2,4 +2,5 @@
 __version__ = "0.8.0"
 from mlac.ir import Architecture, Component, TensorSpec
 from mlac.registry import ModelRegistry, ModelRecord
-__all__ = ["Architecture", "Component", "TensorSpec", "ModelRegistry", "ModelRecord", "__version__"]
+from mlac.master_intelligence import MasterIntelligenceEngine, IntelligenceReport, OptimizationObjective
+__all__ = ["Architecture", "Component", "TensorSpec", "ModelRegistry", "ModelRecord", "MasterIntelligenceEngine", "IntelligenceReport", "OptimizationObjective", "__version__"]

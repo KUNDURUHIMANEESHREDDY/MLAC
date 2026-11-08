@@ -7,6 +7,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 ## Implemented
 
 - Framework-neutral architecture, component, and tensor representation.
+- Master Intelligence Engine: objective normalization, architecture diagnosis, hypothesis generation, ranked experiment plans, and a validated optional LLM-provider interface.
 - In-memory model registry and read-only inspector for trusted, instantiated PyTorch modules.
 - Versioned dropout-configuration mutation on IR snapshots.
 - Proposal-only evolution controller and default-deny production mutation policy.
@@ -35,6 +36,19 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 Optional API: install `pip install -e ".[api]"` and configure `MLAC_API_JWKS_URL`, `MLAC_API_ISSUER`, and `MLAC_API_AUDIENCE` from a trusted OIDC provider before running `mlac serve`. Every non-health route requires a signed bearer JWT with issuer, audience, subject, issued-at, and expiry claims. The API verifies signing keys through the configured JWKS endpoint and scopes models/proposals to the issuer plus subject. Missing identity configuration fails closed with HTTP 503.
 
 The CLI accepts loopback hosts only (`127.0.0.1`, `::1`, or `localhost`) and rejects non-loopback binds. The API registry is still process-local, and its rate limiter is process-local; neither is suitable for multi-worker or production deployment. Durable tenant-scoped storage, distributed rate limiting, TLS gateway deployment, and end-to-end security acceptance remain release blockers.
+
+## Master Intelligence planning
+
+The proposal-only planning engine works without a model-provider API:
+
+    from mlac.master_intelligence import MasterIntelligenceEngine
+    report = MasterIntelligenceEngine().plan(
+        model_id="baseline-001", architecture=architecture,
+        objective="Reduce inference latency by 30%",
+    )
+    print(report.to_dict())
+
+Optional API endpoint: `POST /intelligence/plan` with `model_id`, `architecture`, `objective`, and optional `constraints`. See `docs/MASTER_INTELLIGENCE.md` for the provider interface and safety boundaries. LLM suggestions are untrusted and validated against an operation allowlist; plans never execute or authorize themselves.
 
 ## Candidate evaluation workflow
 
