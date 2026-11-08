@@ -66,7 +66,9 @@ class TrainingDataset:
     def __post_init__(self) -> None:
         if not isinstance(self.revision, str) or not self.revision.strip() or len(self.revision) > 256:
             raise ValueError("dataset revision must be a non-empty identifier of at most 256 characters")
-        if any(not isinstance(split, TensorSplit) for split in (self.train, self.validation, self.heldout)):\n            raise TypeError("train, validation, and heldout must be TensorSplit instances")\n        if any(split.labels is None for split in (self.train, self.validation, self.heldout)):
+        if any(not isinstance(split, TensorSplit) for split in (self.train, self.validation, self.heldout)):
+            raise TypeError("train, validation, and heldout must be TensorSplit instances")
+        if any(split.labels is None for split in (self.train, self.validation, self.heldout)):
             raise ValueError("all training splits require labels")
         sets = [set(split.sample_ids) for split in (self.train, self.validation, self.heldout)]
         if sets[0] & sets[1] or sets[0] & sets[2] or sets[1] & sets[2]:
