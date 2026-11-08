@@ -75,14 +75,10 @@ is not a substitute for the separately configured artifact-store/WORM controls.
 
 - OIDC authentication remains mandatory for every non-health API route.
 - Model reads are filtered by the authenticated issuer/subject principal.
-- The API CLI remains loopback-only. This feature does not enable remote binds.
-- Pre-authentication and principal rate limiters remain process-local. They do
-  not coordinate across multiple workers or hosts.
-- No TLS termination, distributed rate limiting, backup scheduler, restore
-  automation, or production deployment is provided by this feature.
+- The API CLI remains loopback-only. The production container starts Uvicorn behind the Caddy reverse proxy and trusts forwarded headers only from Caddy's pinned container IP.
+- Set MLAC_RATE_LIMIT_REDIS_URL to enable atomic shared peer/principal rate limits across API processes. If Redis is unavailable, protected requests and readiness fail closed with HTTP 503. Without Redis, the in-process limiter is for localhost development only.
+- The production-candidate Docker Compose topology provides Caddy TLS, a persistent SQLite volume, and an internal Redis service. See docs/PRODUCTION_DEPLOYMENT.md for host controls, Object Lock backups, and restore drills.
 - Keep database files and backups out of Git, shared workspaces, and public
   artifact directories.
 
-The API is not production-ready until independent TLS/reverse-proxy controls,
-distributed rate limiting, backup/restore drills, resource authorization,
-monitoring, and deployed acceptance are verified.
+The repository contains a production-candidate deployment topology, but no host is considered production-deployed until the real OIDC provider, HTTPS endpoint, Redis health, S3 Object Lock backup, restore drill, monitoring, and end-to-end acceptance are verified.
