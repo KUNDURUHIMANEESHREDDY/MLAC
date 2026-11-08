@@ -144,15 +144,15 @@ def parse_postgres_target(database_url: str) -> PostgresTarget:
 def _target_is_empty(target: PostgresTarget) -> bool:
     """Refuse any target containing user schemas, relations, functions, or types."""
     try:
-        import psycopg2
+        import psycopg
     except ImportError as exc:
         raise RuntimeError(
-            "psycopg2 is required; install the MLAC production extra"
+            "psycopg is required; install the MLAC production extra"
         ) from exc
 
     connection = None
     try:
-        connection = psycopg2.connect(**target.connection_kwargs())
+        connection = psycopg.connect(**target.connection_kwargs())
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -189,7 +189,7 @@ def _target_is_empty(target: PostgresTarget) -> bool:
             row = cursor.fetchone()
             return row is not None and not bool(row[0])
     except Exception as exc:
-        if exc.__class__.__module__.startswith("psycopg2"):
+        if exc.__class__.__module__.startswith("psycopg"):
             raise RuntimeError(
                 f"cannot inspect the disposable PostgreSQL target ({type(exc).__name__})"
             ) from exc
@@ -201,11 +201,11 @@ def _target_is_empty(target: PostgresTarget) -> bool:
 
 def _count_restored_tables(target: PostgresTarget) -> int:
     """Count user tables after restore without returning row contents."""
-    import psycopg2
+    import psycopg
 
     connection = None
     try:
-        connection = psycopg2.connect(**target.connection_kwargs())
+        connection = psycopg.connect(**target.connection_kwargs())
         with connection.cursor() as cursor:
             cursor.execute("SELECT current_database()")
             row = cursor.fetchone()
@@ -226,7 +226,7 @@ def _count_restored_tables(target: PostgresTarget) -> int:
     except Exception as exc:
         if isinstance(exc, RuntimeError):
             raise
-        if exc.__class__.__module__.startswith("psycopg2"):
+        if exc.__class__.__module__.startswith("psycopg"):
             raise RuntimeError(
                 f"could not verify the restored PostgreSQL database ({type(exc).__name__})"
             ) from exc
