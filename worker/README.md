@@ -198,3 +198,31 @@ convenience references only and must not be used by the production pipeline.
 The package must be accessible to the worker host's container runtime. The
 workflow does not grant access to private packages or provision host pull
 credentials automatically.
+
+## Current verified image
+
+The latest worker release completed its Docker build and synthetic signed-report
+smoke test successfully. Pin this exact immutable image reference:
+
+    ghcr.io/kunduruhimaneeshreddy/mlac-worker@sha256:36b06716bb0adc0fda9039434533520e687f58dbe36c5090e922b85186679501
+
+Controller configuration should use the same digest for both the runner image
+and the worker's `--worker-image` attestation argument. For example:
+
+    worker_image_digest = (
+        "ghcr.io/kunduruhimaneeshreddy/mlac-worker@sha256:"
+        "36b06716bb0adc0fda9039434533520e687f58dbe36c5090e922b85186679501"
+    )
+    pipeline = CandidateEvaluationPipeline(
+        runner=runner,
+        image=worker_image_digest,
+        store=experiment_store,
+        trusted_worker_keys=trusted_worker_keys,
+        worker_identity_dir=worker_identity_dir,
+        worker_entrypoint="/opt/mlac-worker/evaluate-lm",
+        evaluation_policy=EvaluationPolicy(quality_metric="perplexity_score"),
+    )
+
+This is a deployment example; it does not configure an external controller
+instance or provision its worker identity, trusted public key, storage, or
+sandbox host.
