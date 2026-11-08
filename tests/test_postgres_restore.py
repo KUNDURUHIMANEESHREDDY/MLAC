@@ -58,8 +58,8 @@ def postgres_archive_and_target(tmp_path: Path):
     if not shutil.which("pg_dump") or not shutil.which("pg_restore"):
         pytest.skip("PostgreSQL client tools are not installed")
 
-    psycopg2 = pytest.importorskip("psycopg2")
-    from psycopg2 import sql
+    psycopg = pytest.importorskip("psycopg")
+    from psycopg import sql
 
     parsed = urlsplit(base_url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
@@ -76,7 +76,7 @@ def postgres_archive_and_target(tmp_path: Path):
     created: list[str] = []
 
     try:
-        admin = psycopg2.connect(admin_url)
+        admin = psycopg.connect(admin_url)
         try:
             admin.autocommit = True
             with admin.cursor() as cursor:
@@ -87,7 +87,7 @@ def postgres_archive_and_target(tmp_path: Path):
             admin.close()
 
         source = parse_postgres_target(source_url)
-        connection = psycopg2.connect(**source.connection_kwargs())
+        connection = psycopg.connect(**source.connection_kwargs())
         try:
             with connection:
                 with connection.cursor() as cursor:
@@ -121,7 +121,7 @@ def postgres_archive_and_target(tmp_path: Path):
         yield backup, digest, target_url, target_name
     finally:
         if created:
-            cleanup = psycopg2.connect(admin_url)
+            cleanup = psycopg.connect(admin_url)
             try:
                 cleanup.autocommit = True
                 with cleanup.cursor() as cursor:
@@ -137,7 +137,7 @@ def test_postgres_backup_restores_into_empty_disposable_database(
     postgres_archive_and_target,
 ) -> None:
     backup, digest, target_url, target_name = postgres_archive_and_target
-    psycopg2 = pytest.importorskip("psycopg2")
+    psycopg = pytest.importorskip("psycopg")
 
     result = restore_postgres_backup(backup, target_url, digest)
 
@@ -147,7 +147,7 @@ def test_postgres_backup_restores_into_empty_disposable_database(
     assert result["table_count"] == 1
 
     target = parse_postgres_target(target_url)
-    connection = psycopg2.connect(**target.connection_kwargs())
+    connection = psycopg.connect(**target.connection_kwargs())
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT value FROM restore_probe WHERE id = %s", (1,))
@@ -160,10 +160,10 @@ def test_postgres_restore_refuses_nonempty_target_without_changing_it(
     postgres_archive_and_target,
 ) -> None:
     backup, digest, target_url, _target_name = postgres_archive_and_target
-    psycopg2 = pytest.importorskip("psycopg2")
+    psycopg = pytest.importorskip("psycopg")
     target = parse_postgres_target(target_url)
 
-    connection = psycopg2.connect(**target.connection_kwargs())
+    connection = psycopg.connect(**target.connection_kwargs())
     try:
         with connection:
             with connection.cursor() as cursor:
@@ -178,7 +178,7 @@ def test_postgres_restore_refuses_nonempty_target_without_changing_it(
     with pytest.raises(ValueError, match="target is not empty"):
         restore_postgres_backup(backup, target_url, digest)
 
-    connection = psycopg2.connect(**target.connection_kwargs())
+    connection = psycopg.connect(**target.connection_kwargs())
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT value FROM operator_owned")
@@ -227,8 +227,8 @@ def test_postgres_restore_uses_the_exact_verified_snapshot(
     assert result["database"] == target_name
     assert result["sha256"] == digest
     target = restore_module.parse_postgres_target(target_url)
-    psycopg2 = pytest.importorskip("psycopg2")
-    connection = psycopg2.connect(**target.connection_kwargs())
+    psycopg = pytest.importorskip("psycopg")
+    connection = psycopg.connect(**target.connection_kwargs())
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT value FROM restore_probe WHERE id = %s", (1,))
