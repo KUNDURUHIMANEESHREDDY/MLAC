@@ -90,12 +90,18 @@ class DockerSandboxRunner:
         trusted_dir: str | os.PathLike[str] | None = None,
     ) -> SandboxResult:
         """Execute argv in Docker; candidate and trusted evaluation inputs are separate read-only mounts."""
-        source = Path(candidate_dir).expanduser().resolve(strict=True)
+        try:
+            source = Path(candidate_dir).expanduser().resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise ValueError("candidate_dir must be an existing directory") from exc
         if not source.is_dir():
             raise ValueError("candidate_dir must be an existing directory")
         trusted = None
         if trusted_dir is not None:
-            trusted = Path(trusted_dir).expanduser().resolve(strict=True)
+            try:
+                trusted = Path(trusted_dir).expanduser().resolve(strict=True)
+            except FileNotFoundError as exc:
+                raise ValueError("trusted_dir must be an existing directory") from exc
             if not trusted.is_dir():
                 raise ValueError("trusted_dir must be an existing directory")
             if trusted == source:
