@@ -41,8 +41,9 @@ controller does not execute model or dataset code from an untrusted manifest.
 
 `TrainingConfig` fixes the optimizer to AdamW and bounds epochs (1–100),
 batch size (1–1024), patience (1–20), total update steps, learning rate,
-weight decay, gradient clipping, seed, temperature, and distillation alpha.
-Supported schedulers are none, cosine, and step. CPU tensors and deterministic
+weight decay, gradient clipping, seed, temperature, distillation alpha, total update steps, model parameters,
+and per-split tensor bytes. Supported schedulers are none, cosine, and step.
+CPU tensors and deterministic
 PyTorch algorithms are used. The result records per-epoch training/validation
 loss and learning rate, selected epoch, checkpoint SHA-256, dataset SHA-256,
 trainable/total parameter counts, and held-out loss/accuracy.
@@ -95,6 +96,30 @@ evaluate arbitrary classification models; do not pass a generic classifier
 checkpoint to it. A model-family-specific fixed evaluator and candidate
 reconstruction contract must be registered before that family can be promoted.
 The bridge does not bypass the worker or authorize production deployment.
+
+Example governed submission after training:
+
+```python
+from mlac.training_engine import TrainingPromotionWorkflow
+
+promotion = TrainingPromotionWorkflow(
+    pipeline=candidate_evaluation_pipeline,
+    candidate_builder=model_family_candidate_builder,
+)
+result = promotion.evaluate(
+    result=training_result,
+    trusted_evaluation_dir=operator_heldout_bundle,
+    model_id="student-v4",
+    candidate_id="student-v4-distilled-seed-41",
+)
+print(result.status)  # candidate_authorized is candidate-only, not deployment
+```
+
+The candidate builder is trusted controller-side code for a specific supported
+model family. It must write a checkpoint and the exact manifest expected by
+that family's fixed worker. The bridge hashes and archives the training
+evidence with the candidate bundle; the worker independently evaluates the
+checkpoint against the operator-controlled held-out bundle.
 
 No model is deployed or production-mutated by the Training Engine. External
 approval and recovery controls remain outside the self-modifying system.
