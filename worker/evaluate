@@ -1,0 +1,141 @@
+#!/usr/local/bin/python
+"""Trusted, fixed evaluator for MLAC TransformerBlock checkpoint bundles."""
+from __future__ import annotations
+import argparse
+import json
+import math
+import os
+import re
+import sys
+import time
+from pathlib import Path
+import torch
+from mlac.transformer import TransformerBlock
+
+MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
+NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+def artifact(root: Path, name: object) -> Path:
+    if not isinstance(name, str) or not NAME.fullmatch(name) or name in {".", ".."}:
+        raise ValueError("artifact references must be simple file names")
+    path = root / name
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"artifact is missing or is a symlink: {name}")
+    if path.stat().st_size > MAX_ARTIFACT_BYTES:
+        raise ValueError(f"artifact exceeds {MAX_ARTIFACT_BYTES} bytes: {name}")
+    return path
+
+def load_tensor(path: Path) -> torch.Tensor:
+    value = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(value, torch.Tensor):
+        raise ValueError(f"{path.name} must contain one tensor")
+    if not torch.is_floating_point(value) or not torch.isfinite(value).all():
+        raise ValueError(f"{path.name} must contain finite floating-point tensor data")
+    return value
+
+def load_state(path: Path) -> dict:
+    value = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(value, dict) or not value or any(
+        not isinstance(k, str) or not isinstance(v, torch.Tensor) for k, v in value.items()
+    ):
+        raise ValueError(f"{path.name} must contain a tensor-only state_dict")
+    return value
+
+def load_model(config: dict, state_path: Path) -> TransformerBlock:
+    model = TransformerBlock(
+        d_model=config["d_model"], num_heads=config["num_heads"],
+        mlp_ratio=config["mlp_ratio"], dropout=config["dropout"],
+    )
+    model.load_state_dict(load_state(state_path), strict=True)
+    return model.eval()
+
+def benchmark(model: TransformerBlock, sample: torch.Tensor, iterations: int, warmup: int) -> tuple[dict, torch.Tensor]:
+    with torch.inference_mode():
+        for _ in range(warmup):
+            model(sample)
+        start = time.perf_counter()
+        output = None
+        for _ in range(iterations):
+            output = model(sample)
+        latency = (time.perf_counter() - start) * 1000.0 / iterations
+    assert output is not None
+    return ({
+        "parameter_count": sum(p.numel() for p in model.parameters()),
+        "latency_ms_per_iteration": latency,
+        "iterations": iterations,
+        "output_shape": list(output.shape),
+        "finite_output": bool(torch.isfinite(output).all().item()),
+    }, output)
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", required=True)
+    parser.add_argument("--report", required=True)
+    args = parser.parse_args()
+    root = Path(args.input).resolve(strict=True)
+    report_path = Path(args.report)
+    if report_path != Path("/output/report.json"):
+        raise ValueError("report destination must be /output/report.json")
+
+    manifest_path = artifact(root, "manifest.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    required = {"schema_version", "architecture", "baseline_state_dict",
+                "candidate_state_dict", "input_tensor", "target_tensor",
+                "iterations", "warmup"}
+    if not isinstance(manifest, dict) or set(manifest) != required or manifest.get("schema_version") != 1:
+        raise ValueError("manifest must match worker bundle schema version 1")
+    config = manifest["architecture"]
+    config_fields = {"d_model", "num_heads", "mlp_ratio", "dropout"}
+    if not isinstance(config, dict) or set(config) != config_fields:
+        raise ValueError("architecture must contain d_model, num_heads, mlp_ratio, dropout")
+    if any(isinstance(config[k], bool) or not isinstance(config[k], int) or config[k] < 1
+           for k in ("d_model", "num_heads", "mlp_ratio")):
+        raise ValueError("architecture integer fields must be positive")
+    if config["d_model"] % config["num_heads"]:
+        raise ValueError("d_model must be divisible by num_heads")
+    dropout = config["dropout"]
+    if isinstance(dropout, bool) or not isinstance(dropout, (int, float)) or not 0 <= dropout < 1:
+        raise ValueError("dropout must be in [0, 1)")
+    iterations, warmup = manifest["iterations"], manifest["warmup"]
+    if isinstance(iterations, bool) or not isinstance(iterations, int) or not 1 <= iterations <= 500:
+        raise ValueError("iterations must be in [1, 500]")
+    if isinstance(warmup, bool) or not isinstance(warmup, int) or not 0 <= warmup <= 100:
+        raise ValueError("warmup must be in [0, 100]")
+
+    baseline_path = artifact(root, manifest["baseline_state_dict"])
+    candidate_path = artifact(root, manifest["candidate_state_dict"])
+    sample = load_tensor(artifact(root, manifest["input_tensor"]))
+    target = load_tensor(artifact(root, manifest["target_tensor"]))
+    if sample.ndim != 3 or sample.shape[-1] != config["d_model"]:
+        raise ValueError("input tensor must have shape [batch, sequence, d_model]")
+    if target.shape != sample.shape:
+        raise ValueError("regression target tensor must match input tensor shape")
+
+    baseline = load_model(config, baseline_path)
+    candidate = load_model(config, candidate_path)
+    baseline_metrics, baseline_output = benchmark(baseline, sample, iterations, warmup)
+    candidate_metrics, candidate_output = benchmark(candidate, sample, iterations, warmup)
+    with torch.inference_mode():
+        base_mse = torch.nn.functional.mse_loss(baseline_output, target).item()
+        candidate_mse = torch.nn.functional.mse_loss(candidate_output, target).item()
+    if not math.isfinite(base_mse) or not math.isfinite(candidate_mse):
+        raise ValueError("task quality calculation produced non-finite MSE")
+    payload = {
+        "schema_version": 1,
+        "baseline": baseline_metrics,
+        "candidate": candidate_metrics,
+        "quality_baseline": {"score": -float(base_mse)},
+        "quality_candidate": {"score": -float(candidate_mse)},
+    }
+    os.makedirs("/output", exist_ok=True)
+    temporary = Path("/output/report.json.tmp")
+    temporary.write_text(json.dumps(payload, allow_nan=False, separators=(",", ":")), encoding="utf-8")
+    temporary.replace(report_path)
+    return 0
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        print(f"mlac-worker: {type(exc).__name__}: {exc}", file=sys.stderr)
+        raise SystemExit(2)

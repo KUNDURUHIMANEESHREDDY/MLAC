@@ -29,7 +29,7 @@ Optional API: pip install -e ".[api]" then mlac serve. Keep the unauthenticated 
 
 ## Candidate evaluation workflow
 
-The worker image must be trusted and pinned by immutable digest. Its fixed /opt/mlac-worker/evaluate executable evaluates baseline and candidate artifacts from the read-only bundle and writes /output/report.json using schema version 1.
+The included initial worker supports MLAC TransformerBlock tensor-only state dictionaries and a fixed regression metric. Build it from the repository root with `docker build -f worker/Dockerfile -t mlac-worker:local .`, resolve the resulting immutable image digest, and use that digest below. The worker evaluates baseline and candidate artifacts from the read-only bundle and writes /output/report.json using schema version 1. See worker/README.md for the manifest and tensor format.
 
     from mlac.pipeline import CandidateEvaluationPipeline
     from mlac.sandbox import DockerSandboxRunner
@@ -48,7 +48,7 @@ The worker image must be trusted and pinned by immutable digest. Its fixed /opt/
     )
     print(result.status, result.evaluation.evaluation_id)
 
-The pipeline can authorize only a candidate operation. It does not deploy or promote to production. See docs/PHASE5.md and docs/PHASE6.md.
+The pipeline can authorize only a candidate operation. It does not deploy or promote to production. The initial worker does not execute generated Python source; that requires a separately reviewed worker harness. See worker/README.md, docs/PHASE5.md, and docs/PHASE6.md.
 
 ## Safety and limitations
 
