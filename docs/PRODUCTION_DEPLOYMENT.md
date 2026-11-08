@@ -22,16 +22,17 @@ This runbook deploys the OIDC-authenticated API as a single API instance behind 
 - A strong Redis password and a private .env file.
 - A tested backup bucket with S3 versioning and Object Lock COMPLIANCE enabled.
 
-The default Docker subnet is 172.30.0.0/24. Change the subnet and the pinned proxy IP together in docker-compose.yml, Dockerfile, and this runbook if it conflicts with the host network.
+The main-branch workflow publishes immutable image tags to ghcr.io/kunduruhimaneeshreddy/mlac, including sha-<commit>. Pin MLAC_IMAGE to the exact commit that passed CI; do not deploy the mutable main tag. The default Docker subnet is 172.30.0.0/24. Change the subnet and the pinned proxy IP together in docker-compose.yml, Dockerfile, and this runbook if it conflicts with the host network.
 
 ## Configure and start
 
 1. Clone the repository and enter its directory.
 2. Copy .env.example to .env and restrict it with chmod 600.
-3. Edit .env with the real domain and OIDC values. Generate a strong random MLAC_REDIS_PASSWORD; URL-encode reserved characters when placing the password in MLAC_RATE_LIMIT_REDIS_URL. The Redis server password and URL password must match exactly. Never commit .env.
-4. Build and start:
+3. Set MLAC_IMAGE to the immutable sha-<commit> tag published by the main-branch container workflow. Authenticate to ghcr.io with a read:packages credential if the package is private.
+4. Edit .env with the real domain and OIDC values. Generate a strong random MLAC_REDIS_PASSWORD; URL-encode reserved characters when placing the password in MLAC_RATE_LIMIT_REDIS_URL. The Redis server password and URL password must match exactly. Never commit .env.
+5. Pull the pinned image and start:
 
-    docker compose build --pull
+    docker compose pull mlac
     docker compose config --quiet
     docker compose up -d
     docker compose ps
