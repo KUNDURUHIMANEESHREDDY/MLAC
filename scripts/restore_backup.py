@@ -39,6 +39,8 @@ def restore_sqlite_backup(
             "automatic restore supports SQLite backups only; restore PostgreSQL "
             "archives into a dedicated disposable database using the operator runbook"
         )
+    if os.name != "posix" or not hasattr(os, "O_DIRECTORY"):
+        raise ValueError("restore requires POSIX directory fsync support for durable creation")
 
     if not destination.name or destination.name in {".", ".."}:
         raise ValueError("destination must name a new file")
@@ -72,19 +74,21 @@ def restore_sqlite_backup(
     try:
         source_uri = backup.resolve(strict=True).as_uri() + "?mode=ro&immutable=1"
         source = sqlite3.connect(source_uri, uri=True, timeout=10)
-        restored = sqlite3.connect(target, timeout=10)
         try:
-            source.backup(restored)
-            restored.execute("PRAGMA trusted_schema = OFF")
-            restored.execute("PRAGMA query_only = ON")
-            integrity = restored.execute("PRAGMA integrity_check").fetchall()
-            if integrity != [("ok",)]:
-                raise ValueError("restored SQLite database failed integrity_check")
-            table_count = restored.execute(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
-            ).fetchone()[0]
+            restored = sqlite3.connect(target, timeout=10)
+            try:
+                source.backup(restored)
+                restored.execute("PRAGMA trusted_schema = OFF")
+                restored.execute("PRAGMA query_only = ON")
+                integrity = restored.execute("PRAGMA integrity_check").fetchall()
+                if integrity != [("ok",)]:
+                    raise ValueError("restored SQLite database failed integrity_check")
+                table_count = restored.execute(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
+                ).fetchone()[0]
+            finally:
+                restored.close()
         finally:
-            restored.close()
             source.close()
 
         current = target.lstat()
@@ -101,6 +105,12 @@ def restore_sqlite_backup(
             os.fsync(sync_descriptor)
         finally:
             os.close(sync_descriptor)
+
+        directory_descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
 
         return {
             "format": "sqlite",
