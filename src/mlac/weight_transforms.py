@@ -13,6 +13,17 @@ except ImportError as exc:  # pragma: no cover
 from mlac.ir import Architecture, WeightTransformationRequirement
 
 
+_TORCH_DTYPES = {
+    "fp16": torch.float16, "float16": torch.float16,
+    "bf16": torch.bfloat16, "bfloat16": torch.bfloat16,
+    "fp32": torch.float32, "float32": torch.float32,
+    "fp64": torch.float64, "float64": torch.float64,
+    "int8": torch.int8, "uint8": torch.uint8,
+    "int16": torch.int16, "int32": torch.int32, "int64": torch.int64,
+    "bool": torch.bool,
+}
+
+
 @dataclass(frozen=True)
 class TransformationRecord:
     operation: str
@@ -53,6 +64,14 @@ def _execute(
         if len(sources) != 1:
             raise ValueError("reshape requires exactly one source")
         return (sources[0].reshape(tuple(config["shape"])),)
+    if operation == "cast":
+        if len(sources) != 1:
+            raise ValueError("cast requires exactly one source")
+        dtype_name = str(config["dtype"]).lower()
+        dtype = _TORCH_DTYPES.get(dtype_name)
+        if dtype is None:
+            raise ValueError(f"unsupported PyTorch cast dtype: {dtype_name!r}")
+        return (sources[0].to(dtype=dtype),)
     if operation in {"split", "split_qkv"}:
         if len(sources) != 1:
             raise ValueError("split requires exactly one source")
@@ -108,6 +127,14 @@ def _validate_parameter_shape(name: str, value: Tensor,
             )
     if mapping.shape and tuple(mapping.shape) != tuple(value.shape):
         raise ValueError(f"parameter {name!r} violates its parameter mapping shape contract")
+    if spec.dtype != "unknown":
+        expected_dtype = _TORCH_DTYPES.get(spec.dtype.lower())
+        if expected_dtype is None:
+            raise ValueError(f"unsupported PyTorch tensor dtype in MLAC-IR: {spec.dtype!r}")
+        if value.dtype != expected_dtype:
+            raise ValueError(
+                f"parameter {name!r} dtype {value.dtype} does not match declared dtype {spec.dtype!r}"
+            )
 
 
 def apply_weight_transformations(
