@@ -289,6 +289,9 @@ def restore_postgres_backup(
                     target.database,
                     str(snapshot),
                 ],
+                # Keep argv execution explicit: no shell parses archive paths or
+                # the validated target database name as command syntax.
+                shell=False,
                 env=target.environment(),
                 capture_output=True,
                 text=True,
