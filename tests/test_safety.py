@@ -1,4 +1,6 @@
-from dataclasses import replace
+import hashlib
+import json
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -9,6 +11,11 @@ from mlac.safety import (
     SafetyKernel,
     approval_signature,
 )
+
+
+def _digest(policy):
+    payload = json.dumps(asdict(policy), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _approval(key=b"external-operator-secret", **overrides):
@@ -33,7 +40,7 @@ def test_default_safety_kernel_denies_production():
 
 def test_policy_digest_pins_trusted_configuration():
     policy = GuardrailPolicy()
-    digest = SafetyKernel(policy).policy_digest
+    digest = _digest(policy)
     assert SafetyKernel(policy, expected_policy_sha256=digest).policy == policy
     with pytest.raises(PermissionError, match="trusted policy digest"):
         SafetyKernel(policy, expected_policy_sha256="0" * 64)
