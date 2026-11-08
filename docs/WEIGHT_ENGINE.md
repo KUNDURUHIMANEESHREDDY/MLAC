@@ -71,12 +71,16 @@ The fixed worker supports parameter paths beneath `attention.qkv`,
 modules. This is a deliberately narrow adapter, not a generic arbitrary-model
 mutation interface.
 
-Distillation remains a loss primitive and is not yet an executable Master
-Intelligence or worker operation. It requires the Training Engine to supply
-teacher/student loading, dataset controls, optimizer/scheduler, training,
-checkpoint selection, and independently evaluated output before it can enter
-the candidate pipeline. Checkpoint migration remains an explicit library API,
-not a candidate manifest operation.
+Distillation training is now implemented in the separate Training Engine; see
+`docs/TRAINING_ENGINE.md` for its tensor-only split contract, reproducible
+optimizer/scheduler, validation-selected checkpoint, and one-time held-out
+evaluation. It remains a trusted in-process API, not an untrusted worker
+manifest operation. The existing TransformerBlock regression worker does not
+natively evaluate arbitrary classification models, so a fixed model-family
+evaluator and candidate reconstruction contract are required before those
+trained checkpoints can be promoted through `CandidateEvaluationPipeline`.
+Checkpoint migration remains an explicit library API, not a candidate
+manifest operation.
 
 ## Important limitations
 
