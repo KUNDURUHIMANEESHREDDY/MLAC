@@ -2,7 +2,7 @@
 
 MLAC is an open-source research and engineering platform for inspecting machine-learning models, representing structure in a framework-neutral intermediate representation (MLAC-IR), and running governed architecture experiments.
 
-> **Status: MLAC 1.0 production-candidate engineering.** The repository now includes a single-instance Docker deployment topology with Caddy TLS, persistent SQLite metadata, Redis-backed shared rate limiting, and an S3 Object Lock backup utility. It is not considered production-deployed until the target host, OIDC provider, backup bucket, restore drill, and end-to-end evaluation acceptance are verified.
+> **Status: MLAC 1.0 production-candidate engineering.** The repository now includes a single-instance Docker deployment topology with Caddy TLS, persistent PostgreSQL metadata, Redis-backed shared rate limiting, and an S3 Object Lock backup utility. It is not considered production-deployed until the target host, OIDC provider, backup bucket, restore drill, and end-to-end evaluation acceptance are verified.
 
 ## Implemented
 
