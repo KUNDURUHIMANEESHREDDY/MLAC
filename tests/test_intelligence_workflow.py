@@ -1,4 +1,5 @@
 import json
+import runpy
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
@@ -105,3 +106,51 @@ def test_candidate_builder_reconstructs_mlp_resize_and_moe_candidates(tmp_path):
     moe = torch.load(path, map_location="cpu", weights_only=True)
     assert "mlp.router.weight" in moe
     assert "mlp.experts.2.0.weight" in moe
+
+
+@pytest.mark.parametrize("operation,parameters", [
+    ("prune_unstructured", {"target": "mlp.0.weight", "amount": 0.2}),
+    ("prune_structured", {"target": "mlp.0.weight", "dimension": "output", "indices": [0, 2]}),
+    ("fake_quantize_int8", {"target": "mlp.0.weight"}),
+    ("inject_lora", {"target": "attention.out_proj", "rank": 2, "alpha": 4, "dropout": 0.0}),
+])
+def test_weight_candidate_builder_and_fixed_worker_reconstruct_identical_state(
+    tmp_path, operation, parameters
+):
+    trusted = trusted_bundle(tmp_path)
+    output = tmp_path / "candidate"
+    output.mkdir()
+    plan = SimpleNamespace(operation=operation, parameters=parameters)
+    candidate_path = TorchTransformerCandidateBuilder().build(
+        plan=plan, trusted_evaluation_dir=trusted, output_dir=output
+    )
+    candidate_manifest = output / "candidate_manifest.json"
+    worker = runpy.run_path(str(Path("worker/evaluate").resolve()))
+    config = {"d_model": 16, "num_heads": 4, "mlp_ratio": 2, "dropout": 0.0}
+    rebuilt = worker["load_candidate"](
+        config, trusted / "baseline.pt", candidate_path, candidate_manifest
+    )
+    serialized = torch.load(candidate_path, map_location="cpu", weights_only=True)
+    rebuilt_state = rebuilt.state_dict()
+    assert set(rebuilt_state) == set(serialized)
+    assert all(torch.equal(rebuilt_state[key], serialized[key]) for key in serialized)
+
+
+def test_fixed_worker_rejects_weight_manifest_target_escape(tmp_path):
+    trusted = trusted_bundle(tmp_path)
+    output = tmp_path / "candidate"
+    output.mkdir()
+    torch.save(TransformerBlock(d_model=16, num_heads=4, mlp_ratio=2).state_dict(),
+               output / "candidate.pt")
+    manifest = output / "candidate_manifest.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "operation": "fake_quantize_int8",
+        "parameters": {"target": "../../etc/passwd"},
+    }))
+    worker = runpy.run_path(str(Path("worker/evaluate").resolve()))
+    with pytest.raises(ValueError, match="target/fields"):
+        worker["load_candidate"](
+            {"d_model": 16, "num_heads": 4, "mlp_ratio": 2, "dropout": 0.0},
+            trusted / "baseline.pt", output / "candidate.pt", manifest,
+        )
