@@ -273,6 +273,29 @@ def _logits(model: nn.Module, inputs: Tensor) -> Tensor:
     return output
 
 
+def _select_valid_positions(
+    logits: Tensor, labels: Tensor, teacher_logits: Tensor | None = None,
+) -> tuple[Tensor, Tensor, Tensor | None]:
+    """Flatten sequence positions and omit the standard -100 ignore-index tokens."""
+    if tuple(labels.shape) != tuple(logits.shape[:-1]):
+        raise ValueError("label shape must match model logits excluding the class dimension")
+    if teacher_logits is not None and teacher_logits.shape != logits.shape:
+        raise ValueError("teacher and student logits must have identical shapes")
+    flat_labels = labels.reshape(-1).long()
+    valid = flat_labels != -100
+    if not bool(valid.any()):
+        raise ValueError("batch contains no non-masked target tokens")
+    flat_logits = logits.reshape(-1, logits.shape[-1])[valid]
+    selected_labels = flat_labels[valid]
+    if int(selected_labels.min()) < 0 or int(selected_labels.max()) >= logits.shape[-1]:
+        raise ValueError("classification labels are outside the model output class range")
+    selected_teacher = (
+        teacher_logits.reshape(-1, teacher_logits.shape[-1])[valid]
+        if teacher_logits is not None else None
+    )
+    return flat_logits, selected_labels, selected_teacher
+
+
 def _classification_loss(logits: Tensor, labels: Tensor) -> Tensor:
     if labels.dtype not in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
         raise ValueError("classification labels must be integers")
@@ -292,8 +315,11 @@ def _evaluate(model: nn.Module, split: TensorSplit, *, mode: str, teacher: nn.Mo
             inputs = split.inputs[start:start + config.batch_size]
             labels = split.labels[start:start + config.batch_size].long()
             student_logits = _logits(model, inputs)
+            teacher_logits = _logits(teacher, inputs) if mode == "distillation" else None
+            student_logits, labels, teacher_logits = _select_valid_positions(
+                student_logits, labels, teacher_logits,
+            )
             if mode == "distillation":
-                teacher_logits = _logits(teacher, inputs)
                 loss = distillation_loss(
                     student_logits, teacher_logits, labels=labels,
                     temperature=config.temperature, alpha=config.distillation_alpha,
@@ -427,6 +453,12 @@ class TrainingEngine:
                         if mode == "distillation":
                             with torch.inference_mode():
                                 teacher_logits = _logits(teacher_copy, inputs)
+                        else:
+                            teacher_logits = None
+                        student_logits, labels, teacher_logits = _select_valid_positions(
+                            student_logits, labels, teacher_logits,
+                        )
+                        if mode == "distillation":
                             loss = distillation_loss(
                                 student_logits, teacher_logits, labels=labels,
                                 temperature=config.temperature, alpha=config.distillation_alpha,
