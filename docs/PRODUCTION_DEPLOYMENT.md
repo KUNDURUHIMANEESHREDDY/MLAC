@@ -43,13 +43,13 @@ Caddy obtains and renews the TLS certificate after DNS and inbound ports are cor
     curl --fail --show-error https://$MLAC_DOMAIN/health
     curl --fail --show-error https://$MLAC_DOMAIN/ready
 
-/ready must report storage: postgres. The endpoint returns 503 if OIDC configuration, SQLite, or Redis readiness checks fail. Verify an authenticated request with a real production-issued OIDC token and verify that a second principal cannot read the first principal's models or proposals.
+/ready must report storage: postgres. The endpoint returns 503 if OIDC configuration, PostgreSQL, or Redis readiness checks fail. Verify an authenticated request with a real production-issued OIDC token and verify that a second principal cannot read the first principal's models or proposals.
 
 ## Operational controls
 
 - PostgreSQL and Redis are the shared state backends for API replicas. Keep their ports private, size PostgreSQL connection limits for the number of API workers, and keep database/Redis volumes on encrypted persistent storage.
 - Do not publish Redis or the API port. Restrict SSH and Docker administration to trusted operators.
-- Keep .env, SQLite data, Redis data, Caddy state, and backups out of source control and public artifacts.
+- Keep .env, PostgreSQL data, Redis data, Caddy state, and backups out of source control and public artifacts.
 - Configure host-level encrypted disk, unattended security updates, firewall policy, log collection, alerting, and a host restart policy.
 - Monitor /health, /ready, disk capacity, container restarts, Redis persistence, certificate renewal, and backup age.
 - Rotate OIDC signing keys and Redis credentials through the relevant provider/secret-management procedures. Restart services after controlled secret rotation.
