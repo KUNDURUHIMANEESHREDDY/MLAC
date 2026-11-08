@@ -10,7 +10,10 @@ from mlac.sqlite_state import SQLiteStateStore
 
 def migrate(source_path: str, target_dsn: str) -> tuple[int, int]:
     """Copy all model/proposal metadata in one PostgreSQL transaction."""
-    source = SQLiteStateStore(source_path)
+    source_file = Path(source_path)
+    if not source_file.is_absolute() or not source_file.is_file() or source_file.is_symlink():
+        raise RuntimeError("source SQLite path must be an existing absolute regular file")
+    source = SQLiteStateStore(source_file)
     source.health_check()
     models = source.list_models()
     proposals = source.list_proposals()
