@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mlac.dev/schemas/mlac-ir-v1.schema.json",
+  "title": "MLAC Intermediate Representation v1",
+  "description": "Framework-neutral architecture declaration used by MLAC.",
+  "$ref": "#/$defs/architecture",
+  "$defs": {
+    "dimension": {
+      "oneOf": [
+        {"type": "integer", "minimum": 0},
+        {"type": "string", "minLength": 1}
+      ]
+    },
+    "tensorSpec": {
+      "type": "object",
+      "required": ["name", "shape"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "shape": {"type": "array", "items": {"$ref": "#/$defs/dimension"}},
+        "dtype": {"type": "string", "minLength": 1, "default": "unknown"},
+        "layout": {"type": "string", "minLength": 1, "default": "contiguous"},
+        "trainable": {"type": "boolean", "default": true}
+      },
+      "additionalProperties": false
+    },
+    "component": {
+      "type": "object",
+      "required": ["name", "kind"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "config": {"type": "object", "default": {}}
+      },
+      "additionalProperties": false
+    },
+    "graphNode": {
+      "type": "object",
+      "required": ["node_id", "operation"],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "operation": {"type": "string", "minLength": 1},
+        "component_name": {"type": ["string", "null"]},
+        "attributes": {"type": "object", "default": {}}
+      },
+      "additionalProperties": false
+    },
+    "graphEdge": {
+      "type": "object",
+      "required": ["source", "target"],
+      "properties": {
+        "source": {"type": "string", "minLength": 1},
+        "target": {"type": "string", "minLength": 1},
+        "tensor_name": {"type": ["string", "null"]},
+        "source_port": {"type": "string", "minLength": 1, "default": "output"},
+        "target_port": {"type": "string", "minLength": 1, "default": "input"}
+      },
+      "additionalProperties": false
+    },
+    "parameterMapping": {
+      "type": "object",
+      "required": ["parameter_name", "tensor_name"],
+      "properties": {
+        "parameter_name": {"type": "string", "minLength": 1},
+        "tensor_name": {"type": "string", "minLength": 1},
+        "component_name": {"type": ["string", "null"]},
+        "checkpoint_key": {"type": ["string", "null"]},
+        "shape": {"type": "array", "items": {"$ref": "#/$defs/dimension"}, "default": []},
+        "transform": {"type": "string", "default": "identity"}
+      },
+      "additionalProperties": false
+    },
+    "initializationStrategy": {
+      "type": "object",
+      "required": ["target", "method"],
+      "properties": {
+        "target": {"type": "string", "minLength": 1},
+        "method": {"type": "string", "minLength": 1},
+        "config": {"type": "object", "default": {}},
+        "seed": {"type": ["integer", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "compatibilityConstraint": {
+      "type": "object",
+      "required": ["target", "operator", "value"],
+      "properties": {
+        "target": {"type": "string", "minLength": 1},
+        "operator": {"enum": ["eq", "ne", "gte", "lte", "in", "contains"]},
+        "value": {},
+        "severity": {"enum": ["error", "warning"], "default": "error"},
+        "message": {"type": "string", "default": ""}
+      },
+      "additionalProperties": false
+    },
+    "runtimeRequirements": {
+      "type": "object",
+      "properties": {
+        "backend": {"type": ["string", "null"]},
+        "required_features": {"type": "array", "items": {"type": "string"}, "default": []},
+        "required_dtypes": {"type": "array", "items": {"type": "string"}, "default": []},
+        "minimum_memory_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "maximum_sequence_length": {"type": ["integer", "null"], "minimum": 1},
+        "required_devices": {"type": "array", "items": {"type": "string"}, "default": []}
+      },
+      "additionalProperties": false
+    },
+    "runtimeCapabilities": {
+      "type": "object",
+      "required": ["backend"],
+      "properties": {
+        "backend": {"type": "string", "minLength": 1},
+        "features": {"type": "array", "items": {"type": "string"}, "default": []},
+        "supported_dtypes": {"type": "array", "items": {"type": "string"}, "default": []},
+        "devices": {"type": "array", "items": {"type": "string"}, "default": []},
+        "available_memory_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "maximum_sequence_length": {"type": ["integer", "null"], "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "weightTransformationRequirement": {
+      "type": "object",
+      "required": ["operation", "source_parameters", "target_parameters"],
+      "properties": {
+        "operation": {"type": "string", "minLength": 1},
+        "source_parameters": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "target_parameters": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "config": {"type": "object", "default": {}},
+        "preserves_function": {"type": "boolean", "default": false}
+      },
+      "additionalProperties": false
+    },
+    "architecture": {
+      "type": "object",
+      "required": ["name", "family"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "family": {"type": "string", "minLength": 1},
+        "version": {"type": "integer", "minimum": 1, "default": 1},
+        "framework": {"type": "string", "default": "unknown"},
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {"type": "integer", "minimum": 0},
+              {"type": "number", "minimum": 0},
+              {"type": "string", "minLength": 1}
+            ]
+          },
+          "default": {}
+        },
+        "components": {"type": "array", "items": {"$ref": "#/$defs/component"}, "default": []},
+        "tensors": {"type": "array", "items": {"$ref": "#/$defs/tensorSpec"}, "default": []},
+        "metadata": {"type": "object", "default": {}},
+        "graph_nodes": {"type": "array", "items": {"$ref": "#/$defs/graphNode"}, "default": []},
+        "graph_edges": {"type": "array", "items": {"$ref": "#/$defs/graphEdge"}, "default": []},
+        "parameter_mappings": {"type": "array", "items": {"$ref": "#/$defs/parameterMapping"}, "default": []},
+        "initialization": {"type": "array", "items": {"$ref": "#/$defs/initializationStrategy"}, "default": []},
+        "compatibility_constraints": {"type": "array", "items": {"$ref": "#/$defs/compatibilityConstraint"}, "default": []},
+        "runtime_requirements": {"$ref": "#/$defs/runtimeRequirements"},
+        "weight_transformations": {"type": "array", "items": {"$ref": "#/$defs/weightTransformationRequirement"}, "default": []},
+        "schema_version": {"const": 1, "default": 1}
+      },
+      "additionalProperties": false
+    }
+  }
+}
