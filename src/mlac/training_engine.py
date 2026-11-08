@@ -99,7 +99,7 @@ class TrainingDataset:
                 value = tensor.detach().cpu().contiguous()
                 digest.update(str(value.dtype).encode("ascii"))
                 digest.update(str(tuple(value.shape)).encode("ascii"))
-                digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
+                _update_tensor_digest(digest, value)
         return digest.hexdigest()
 
 
@@ -212,6 +212,14 @@ class TrainingResult:
             "heldout_examples": self.heldout_examples,
             "lora_targets": list(self.lora_targets),
         }
+
+
+def _update_tensor_digest(digest: Any, value: Tensor) -> None:
+    """Hash raw CPU tensor bytes without requiring NumPy or large byte copies."""
+    raw = value.reshape(-1).view(torch.uint8)
+    chunk_size = 1024 * 1024
+    for offset in range(0, raw.numel(), chunk_size):
+        digest.update(bytes(raw[offset:offset + chunk_size].tolist()))
 
 
 def _state_digest(state: Mapping[str, Tensor]) -> str:
