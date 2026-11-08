@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 import stat
 from pathlib import Path
@@ -126,11 +127,11 @@ def test_restore_syncs_file_and_parent_directory(
     digest = _backup(backup)
     destination = tmp_path / "isolated" / "restored.sqlite3"
     destination.parent.mkdir(mode=0o700)
-    real_fsync = __import__("os").fsync
+    real_fsync = os.fsync
     synced_modes: list[int] = []
 
     def record_fsync(descriptor: int) -> None:
-        synced_modes.append(__import__("os").fstat(descriptor).st_mode)
+        synced_modes.append(os.fstat(descriptor).st_mode)
         real_fsync(descriptor)
 
     monkeypatch.setattr("scripts.restore_backup.os.fsync", record_fsync)
