@@ -4,6 +4,7 @@ Proposal-only: never executes model code, changes weights, or authorizes promoti
 """
 from __future__ import annotations
 import json
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -28,8 +29,12 @@ class OptimizationObjective:
             raise ValueError("unsupported primary metric")
         if self.direction not in {"minimize", "maximize"}:
             raise ValueError("direction must be minimize or maximize")
-        if self.target_value is not None and self.target_value <= 0:
-            raise ValueError("target_value must be positive")
+        if self.target_value is not None and (
+            isinstance(self.target_value, bool)
+            or not math.isfinite(self.target_value)
+            or self.target_value <= 0
+        ):
+            raise ValueError("target_value must be finite and positive")
 
 
 @dataclass(frozen=True)
@@ -108,8 +113,12 @@ class MasterIntelligenceEngine:
                  max_plans: int = 5, max_parameter_growth_ratio: float = 0.10):
         if not 1 <= max_plans <= 20:
             raise ValueError("max_plans must be between 1 and 20")
-        if max_parameter_growth_ratio < 0:
-            raise ValueError("max_parameter_growth_ratio must be >= 0")
+        if (
+            isinstance(max_parameter_growth_ratio, bool)
+            or not math.isfinite(max_parameter_growth_ratio)
+            or max_parameter_growth_ratio < 0
+        ):
+            raise ValueError("max_parameter_growth_ratio must be finite and >= 0")
         self.backend = backend
         self.max_plans = max_plans
         self.max_parameter_growth_ratio = max_parameter_growth_ratio
@@ -146,7 +155,11 @@ class MasterIntelligenceEngine:
             if key not in {"max_latency_regression_ratio", "max_parameter_growth_ratio",
                            "minimum_quality_delta", "max_memory_growth_ratio"}:
                 raise ValueError(f"unsupported constraint: {key}")
+            if isinstance(val, bool):
+                raise ValueError(f"{key} must be a finite number")
             number = float(val)
+            if not math.isfinite(number):
+                raise ValueError(f"{key} must be a finite number")
             if number < 0 and key != "minimum_quality_delta":
                 raise ValueError(f"{key} must be >= 0")
             normalized[key] = number
@@ -210,48 +223,115 @@ class MasterIntelligenceEngine:
                     })
         return plans
 
-    def _validate_proposal(self, raw: Mapping[str, Any], objective: OptimizationObjective, architecture: Architecture, index: int) -> ExperimentPlan:
+    def _validate_proposal(
+        self,
+        raw: Mapping[str, Any],
+        objective: OptimizationObjective,
+        architecture: Architecture,
+        index: int,
+    ) -> ExperimentPlan:
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"proposal {index}: proposal must be an object")
         operation = raw.get("operation")
         if operation not in self.ALLOWED_OPERATIONS:
             raise ValueError(f"proposal {index}: unsupported operation {operation!r}")
-        params = raw.get("parameters", {})
-        if not isinstance(params, Mapping):
+        supplied_params = raw.get("parameters", {})
+        if not isinstance(supplied_params, Mapping):
             raise ValueError(f"proposal {index}: parameters must be an object")
+        params = {key: value for key, value in supplied_params.items() if value is not None}
+
         if operation == "prune_attention_heads":
+            if set(params) != {"module_name", "heads_to_prune"}:
+                raise ValueError(f"proposal {index}: pruning parameters must contain only module_name and heads_to_prune")
             name, heads = params.get("module_name"), params.get("heads_to_prune")
             if not isinstance(name, str) or not name.strip() or not isinstance(heads, list) or not heads:
                 raise ValueError(f"proposal {index}: pruning requires module_name and non-empty heads_to_prune")
-            if any(isinstance(h, bool) or not isinstance(h, int) or h < 0 for h in heads):
+            if any(isinstance(head, bool) or not isinstance(head, int) or head < 0 for head in heads):
                 raise ValueError(f"proposal {index}: head indices must be non-negative integers")
-            component = next((c for c in architecture.components if c.name == name), None)
-            if component is None or not ("attention" in component.kind.lower() or "attn" in component.name.lower()):
+            component = next((item for item in architecture.components if item.name == name), None)
+            if component is None or not (
+                "attention" in component.kind.lower() or "attn" in component.name.lower()
+            ):
                 raise ValueError(f"proposal {index}: pruning target is not an inspected attention component")
             head_count = component.config.get("num_heads")
-            if not isinstance(head_count, int) or any(h >= head_count for h in heads) or len(set(heads)) != len(heads) or len(set(heads)) >= head_count:
-                raise ValueError(f"proposal {index}: pruned head indices must be unique, in range, and leave at least one head")
-        if operation == "reduce_dropout":
-            name, probability = params.get("module_name"), params.get("p")
-            component = next((c for c in architecture.components if c.name == name), None)
-            if component is None or "dropout" not in component.kind.lower():
-                raise ValueError(f"proposal {index}: dropout target is not an inspected dropout component")
-            if isinstance(probability, bool) or not isinstance(probability, (int, float)) or not 0 <= probability <= 1:
-                raise ValueError(f"proposal {index}: dropout p must be between 0 and 1")
+            if (
+                not isinstance(head_count, int)
+                or isinstance(head_count, bool)
+                or any(head >= head_count for head in heads)
+                or len(set(heads)) != len(heads)
+                or len(set(heads)) >= head_count
+            ):
+                raise ValueError(
+                    f"proposal {index}: pruned head indices must be unique, in range, and leave at least one head"
+                )
+        else:
+            allowed = {"warmup_iterations", "measurement_iterations"}
+            if set(params) - allowed:
+                raise ValueError(f"proposal {index}: profile_model contains unsupported parameters")
+            warmup = params.get("warmup_iterations", 5)
+            iterations = params.get("measurement_iterations", 30)
+            if (
+                isinstance(warmup, bool)
+                or not isinstance(warmup, int)
+                or not 0 <= warmup <= 1000
+            ):
+                raise ValueError(f"proposal {index}: warmup_iterations must be an integer from 0 to 1000")
+            if (
+                isinstance(iterations, bool)
+                or not isinstance(iterations, int)
+                or not 1 <= iterations <= 1000
+            ):
+                raise ValueError(f"proposal {index}: measurement_iterations must be an integer from 1 to 1000")
+            params = {"warmup_iterations": warmup, "measurement_iterations": iterations}
+
         for key in ("hypothesis", "rationale"):
-            if not isinstance(raw.get(key), str) or not raw[key].strip():
-                raise ValueError(f"proposal {index}: {key} must be non-empty")
-        expected, criteria = raw.get("expected_effect", {}), raw.get("falsification_criteria", [])
-        if not isinstance(expected, Mapping) or not isinstance(criteria, list) or not criteria:
-            raise ValueError(f"proposal {index}: expected_effect and falsification criteria are required")
+            value_text = raw.get(key)
+            if not isinstance(value_text, str) or not value_text.strip() or len(value_text) > 2000:
+                raise ValueError(f"proposal {index}: {key} must be a non-empty string of at most 2000 characters")
+        expected = raw.get("expected_effect", {})
+        criteria = raw.get("falsification_criteria", [])
+        if not isinstance(expected, Mapping) or not expected or len(expected) > 12:
+            raise ValueError(f"proposal {index}: expected_effect must be a non-empty object with at most 12 entries")
+        if any(
+            not isinstance(key, str)
+            or not key.strip()
+            or not isinstance(value, str)
+            or not value.strip()
+            or len(value) > 500
+            for key, value in expected.items()
+        ):
+            raise ValueError(f"proposal {index}: expected_effect keys and values must be bounded non-empty strings")
+        if (
+            not isinstance(criteria, list)
+            or not 1 <= len(criteria) <= 12
+            or any(not isinstance(item, str) or not item.strip() or len(item) > 500 for item in criteria)
+        ):
+            raise ValueError(f"proposal {index}: provide 1 to 12 bounded falsification criteria")
         risk = raw.get("risk", "medium")
         if risk not in {"low", "medium", "high"}:
             raise ValueError(f"proposal {index}: risk must be low, medium, or high")
-        value, feasibility = float(raw.get("estimated_value", 0.5)), float(raw.get("feasibility", 0.5))
-        if not 0 <= value <= 1 or not 0 <= feasibility <= 1:
-            raise ValueError(f"proposal {index}: value and feasibility must be between 0 and 1")
-        hypothesis = ExperimentHypothesis(raw["hypothesis"], raw["rationale"],
-            {str(k): str(v) for k, v in expected.items()}, tuple(str(x) for x in criteria))
-        return ExperimentPlan(str(uuid4()), objective, hypothesis, operation, dict(params),
-            self.MEASUREMENTS, risk, value, feasibility)
+        raw_value = raw.get("estimated_value", 0.5)
+        raw_feasibility = raw.get("feasibility", 0.5)
+        if isinstance(raw_value, bool) or isinstance(raw_feasibility, bool):
+            raise ValueError(f"proposal {index}: value and feasibility must be finite numbers from 0 to 1")
+        value, feasibility = float(raw_value), float(raw_feasibility)
+        if (
+            not math.isfinite(value)
+            or not math.isfinite(feasibility)
+            or not 0 <= value <= 1
+            or not 0 <= feasibility <= 1
+        ):
+            raise ValueError(f"proposal {index}: value and feasibility must be finite numbers from 0 to 1")
+        hypothesis = ExperimentHypothesis(
+            raw["hypothesis"],
+            raw["rationale"],
+            {str(key): str(value) for key, value in expected.items()},
+            tuple(criteria),
+        )
+        return ExperimentPlan(
+            str(uuid4()), objective, hypothesis, operation, dict(params),
+            self.MEASUREMENTS, risk, value, feasibility,
+        )
 
     def plan(self, *, model_id: str, architecture: Architecture | Mapping[str, Any],
              objective: str, constraints: Mapping[str, float] | None = None) -> IntelligenceReport:
@@ -269,7 +349,9 @@ class MasterIntelligenceEngine:
                              "max_parameter_growth_ratio": self.max_parameter_growth_ratio})
             if not isinstance(proposals, list):
                 raise ValueError("reasoning backend must return a list")
-            raw_plans.extend(dict(p) for p in proposals)
+            if len(proposals) > min(100, self.max_plans * 10):
+                raise ValueError("reasoning backend returned too many proposals")
+            raw_plans.extend(proposals)
             planner = "rules+llm"
         plans, seen = [], set()
         for index, raw in enumerate(raw_plans):
@@ -278,11 +360,26 @@ class MasterIntelligenceEngine:
             if fingerprint not in seen:
                 plans.append(plan)
                 seen.add(fingerprint)
-        plans.sort(key=lambda p: (p.estimated_value * p.feasibility,
-                                  {"low": 2, "medium": 1, "high": 0}[p.risk]), reverse=True)
+        risk_weight = {"low": 1.0, "medium": 0.85, "high": 0.6}
+        plans.sort(
+            key=lambda plan: (
+                plan.estimated_value * plan.feasibility * risk_weight[plan.risk],
+                plan.feasibility,
+                plan.estimated_value,
+            ),
+            reverse=True,
+        )
         plans = plans[:self.max_plans]
-        summary = (f"Analyzed {len(arch.components)} components and {len(arch.tensors)} tensors. "
-                   f"Found {len(diagnoses)} diagnostic signals and ranked {len(plans)} experiment plans. "
-                   "Plans are proposals; execution, evaluation, and authorization remain separate.")
+        recommendation = (
+            f" Top-ranked proposal: {plans[0].operation} "
+            f"(risk={plans[0].risk}, estimated utility="
+            f"{plans[0].estimated_value * plans[0].feasibility * risk_weight[plans[0].risk]:.3f})."
+            if plans else " No valid experiment proposal was produced."
+        )
+        summary = (
+            f"Analyzed {len(arch.components)} components and {len(arch.tensors)} tensors. "
+            f"Found {len(diagnoses)} diagnostic signals and ranked {len(plans)} experiment plans."
+            f"{recommendation} Plans are proposals; execution, evaluation, and authorization remain separate."
+        )
         return IntelligenceReport(str(uuid4()), model_id, arch.name, goal,
             tuple(diagnoses), tuple(plans), summary, planner)
