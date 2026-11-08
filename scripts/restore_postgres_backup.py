@@ -165,16 +165,16 @@ def _target_is_empty(target: PostgresTarget) -> bool:
                     )
                     OR EXISTS (
                         SELECT 1
-                        FROM pg_catalog.pg_proc AS procedure
+                        FROM pg_catalog.pg_proc AS proc
                         JOIN pg_catalog.pg_namespace AS namespace
-                          ON namespace.oid = procedure.pronamespace
+                          ON namespace.oid = proc.pronamespace
                         WHERE namespace.nspname NOT IN ('pg_catalog', 'information_schema')
                     )
                     OR EXISTS (
                         SELECT 1
-                        FROM pg_catalog.pg_type AS type
+                        FROM pg_catalog.pg_type AS typ
                         JOIN pg_catalog.pg_namespace AS namespace
-                          ON namespace.oid = type.typnamespace
+                          ON namespace.oid = typ.typnamespace
                         WHERE namespace.nspname NOT IN ('pg_catalog', 'information_schema')
                     )
                     OR EXISTS (
@@ -281,11 +281,11 @@ def restore_postgres_backup(
         raise RuntimeError("pg_restore could not be started") from exc
 
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        if target.password:
-            detail = detail.replace(target.password, "[redacted]")
+        # Restore output can contain schema names and database values. Keep it
+        # out of routine logs; the operator can inspect protected runner logs.
         raise RuntimeError(
-            f"pg_restore failed with exit code {result.returncode}: {detail[:400]}"
+            f"pg_restore failed with exit code {result.returncode}; "
+            "restore output was suppressed to avoid logging database contents"
         )
 
     table_count = _count_restored_tables(target)
