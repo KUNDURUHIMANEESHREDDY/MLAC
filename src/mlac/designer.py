@@ -38,6 +38,7 @@ class DesignConstraints:
     bias: bool = True
     dtype: str = "fp32"
     candidate_limit: int = 100
+    search_evaluation_limit: int = 10000
 
     def __post_init__(self) -> None:
         if isinstance(self.input_size, bool) or self.input_size < 1:
@@ -67,6 +68,8 @@ class DesignConstraints:
             raise ValueError("target_parameters must be positive")
         if self.candidate_limit < 1 or self.candidate_limit > 10000:
             raise ValueError("candidate_limit must be between 1 and 10000")
+        if self.search_evaluation_limit < 1 or self.search_evaluation_limit > 100000:
+            raise ValueError("search_evaluation_limit must be between 1 and 100000")
         if not isinstance(self.dtype, str) or self.dtype.lower() not in {
             "fp16", "bf16", "fp32", "fp64"
         }:
@@ -90,6 +93,15 @@ class ArchitectureDesigner:
     def generate(self, constraints: DesignConstraints) -> tuple[DesignCandidate, ...]:
         if not isinstance(constraints, DesignConstraints):
             raise TypeError("constraints must be a DesignConstraints instance")
+        search_size = len(constraints.allowed_activations) * sum(
+            len(constraints.hidden_sizes) ** depth
+            for depth in range(constraints.min_layers, constraints.max_layers + 1)
+        )
+        if search_size > constraints.search_evaluation_limit:
+            raise ValueError(
+                f"design search contains {search_size} candidates, exceeding "
+                f"search_evaluation_limit={constraints.search_evaluation_limit}"
+            )
         candidates: list[DesignCandidate] = []
         for depth in range(constraints.min_layers, constraints.max_layers + 1):
             for widths in product(constraints.hidden_sizes, repeat=depth):
@@ -185,7 +197,7 @@ class ArchitectureDesigner:
                 previous = linear_id
 
         architecture = Architecture(
-            name=f"mlp-{constraints.input_size}-{'-'.join(map(str, hidden_widths))}-{constraints.output_size}",
+            name=f"mlp-{constraints.input_size}-{'-'.join(map(str, hidden_widths))}-{constraints.output_size}-{activation}",
             family="mlp",
             framework="pytorch",
             dimensions={
