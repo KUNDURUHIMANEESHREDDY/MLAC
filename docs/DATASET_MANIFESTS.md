@@ -63,11 +63,15 @@ record and worker input manifest.
 - A valid signature establishes that a trusted signer approved the manifest;
   it does not establish dataset licensing, correctness, representativeness,
   contamination status, or quality.
-- The Training Engine accepts an optional `SignedDatasetBinding` and
-  verifies its signature, file hashes, revision, and train/validation/test
-  split declarations before starting a run. It records the manifest digest and
+- `CandidateEvaluationPipeline` requires a signed manifest in the trusted
+  evaluation directory and verifies it with its operator-configured
+  `trusted_dataset_signers` before starting the worker. The verified dataset
+  provenance is included in the pipeline result and experiment record.
+- The Training Engine accepts an optional `SignedDatasetBinding` and verifies
+  its signature, file hashes, revision, and train/validation/test split
+  declarations before starting a run. It records the manifest digest and
   signer ID in the training evidence.
-- Other training/evaluation workflows do not automatically enforce this
+- Other local training/evaluation APIs do not automatically enforce this
   manifest. The in-memory tensor loader remains trusted controller-side code;
   file-level signing does not prove that preprocessing mapped source files to
   tensors correctly.
