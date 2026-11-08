@@ -24,12 +24,14 @@ from mlac.evolution import EvolutionController
 from mlac.ir import Architecture
 from mlac.master_intelligence import MasterIntelligenceEngine
 from mlac.openai_backend import OpenAIProviderError, OpenAIResponsesBackend
-from mlac.registry import ModelRegistry
 from mlac.rate_limit import RateLimiterUnavailable, RedisRateLimiter
+from mlac.registry import ModelRegistry
 from mlac.sqlite_state import SQLiteStateStore
 
 
-def _configured_rate_limiter(*, namespace: str, limit: int, window_seconds: float, max_keys: int):
+def _configured_rate_limiter(
+    *, namespace: str, limit: int, window_seconds: float, max_keys: int
+) -> Any:
     """Use Redis when configured; otherwise retain the bounded local limiter."""
     redis_url = os.getenv("MLAC_RATE_LIMIT_REDIS_URL")
     if redis_url:
