@@ -66,6 +66,10 @@ def test_compiler_supports_multi_input_ops_and_multiple_outputs():
 def test_compiler_accepts_custom_registered_operators():
     from torch import nn
 
+    class Double(nn.Module):
+        def forward(self, value):
+            return value * 2
+
     architecture = Architecture(
         name="custom",
         family="graph",
@@ -73,10 +77,10 @@ def test_compiler_accepts_custom_registered_operators():
         graph_edges=(GraphEdge("input", "double"),),
     )
     model = compile_architecture(
-        architecture, custom_operators={"double": lambda attrs: nn.Identity()}
+        architecture, custom_operators={"double": lambda attrs: Double()}
     )
     x = torch.tensor([2.])
-    assert torch.equal(model(x), x)
+    assert torch.equal(model(x), torch.tensor([4.]))
 
 
 def test_compiler_rejects_cycles_and_unknown_operators():
