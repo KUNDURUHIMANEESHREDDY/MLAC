@@ -1,9 +1,10 @@
-"""Optional OIDC-authenticated FastAPI interface.
+"""OIDC-authenticated FastAPI interface with PostgreSQL and SQLite state stores.
 
-Without MLAC_API_STATE_DB the registry is process-local and non-durable. The CLI
-therefore refuses non-loopback binds even when OIDC is configured. Setting
-MLAC_API_STATE_DB enables file-backed SQLite metadata persistence, but does not
-enable multi-worker or network deployment.
+MLAC_API_DATABASE_URL enables durable tenant-scoped PostgreSQL persistence.
+MLAC_API_STATE_DB enables single-host SQLite persistence for development. Without
+either setting, state is process-local and is not suitable for production. The
+CLI itself remains loopback-only; the container runtime uses the pinned Caddy
+reverse proxy and shared Redis rate limiting.
 """
 from __future__ import annotations
 
