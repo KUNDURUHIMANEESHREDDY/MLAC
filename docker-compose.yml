@@ -2,7 +2,7 @@ services:
   mlac:
     build:
       context: .
-    image: mlac:1.0.0
+    image: mlac:production-candidate
     restart: unless-stopped
     env_file: .env
     environment:
