@@ -21,6 +21,7 @@ class TorchTransformerCandidateBuilder:
         try:
             import torch
             from mlac.modification import Modification, modify_model
+            from mlac.weight_engine import WeightOptimizationPlan, WeightOptimizationStep, optimize_weights
             from mlac.transformer import TransformerBlock
         except ImportError as exc:
             raise RuntimeError("Install MLAC with PyTorch: pip install 'mlac[torch]'") from exc
@@ -94,6 +95,15 @@ class TorchTransformerCandidateBuilder:
             model = modify_model(
                 model, Modification(plan.operation, operation_parameters)
             ).module.eval()
+        elif plan.operation in {"prune_unstructured", "prune_structured", "fake_quantize_int8", "inject_lora"}:
+            params = dict(plan.parameters)
+            target = params.pop("target", None)
+            if not isinstance(target, str):
+                raise ValueError("weight optimization plan requires an explicit target")
+            step = WeightOptimizationStep(plan.operation, target, params)
+            model = optimize_weights(
+                model, WeightOptimizationPlan((step,))
+            ).model.eval()
         elif plan.operation != "profile_model":
             raise ValueError(f"no trusted candidate builder is registered for {plan.operation!r}")
 
