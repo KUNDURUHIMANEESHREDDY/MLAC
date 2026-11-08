@@ -115,7 +115,7 @@ def test_compiler_executes_declared_initialization_strategy():
         ),
         graph_edges=(GraphEdge("input", "projection"),),
         tensors=(
-            TensorSpec("proj.weight", (2, 3), "fp32"),
+            TensorSpec("proj.weight", (2, 3), "bf16"),
             TensorSpec("proj.bias", (2,), "fp32"),
         ),
         parameter_mappings=(
@@ -132,6 +132,7 @@ def test_compiler_executes_declared_initialization_strategy():
         ),
     )
     model = compile_architecture(architecture)
+    assert model.nodes[0].weight.dtype == torch.bfloat16
     assert torch.count_nonzero(model.nodes[0].weight) == 0
     assert torch.allclose(model.nodes[0].bias, torch.full((2,), 0.25))
 
