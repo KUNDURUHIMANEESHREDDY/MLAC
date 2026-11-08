@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://mlac.dev/schemas/mlac-ir-v1.schema.json",
+  "$id": "https://github.com/KUNDURUHIMANEESHREDDY/MLAC/blob/main/schemas/mlac-ir-v1.schema.json",
   "title": "MLAC Intermediate Representation v1",
   "description": "Framework-neutral architecture declaration used by MLAC.",
   "$ref": "#/$defs/architecture",
@@ -140,8 +140,7 @@
         "dimensions": {
           "type": "object",
           "additionalProperties": {
-            "oneOf": [
-              {"type": "integer", "minimum": 0},
+            "anyOf": [
               {"type": "number", "minimum": 0},
               {"type": "string", "minLength": 1}
             ]
