@@ -161,7 +161,7 @@ class PostgresStateStore:
         metadata = dict(record.metadata or {})
         owner = metadata.get("owner", "")
         if not isinstance(owner, str):
-            raise ValueError("model owner must be a string")
+            raise TypeError("model owner must be a string")
         with self._connect() as connection:
             connection.execute(
                 """
