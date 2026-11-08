@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any
 from uuid import uuid4
 
@@ -48,8 +49,13 @@ class RedisRateLimiter:
             raise ValueError("rate limiter namespace must be a non-empty string")
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError("rate limit must be a positive integer")
-        if isinstance(window_seconds, bool) or window_seconds <= 0:
-            raise ValueError("rate limit window must be positive")
+        if (
+            isinstance(window_seconds, bool)
+            or not isinstance(window_seconds, (int, float))
+            or not math.isfinite(window_seconds)
+            or window_seconds <= 0
+        ):
+            raise ValueError("rate limit window must be a finite positive number")
         self.client = client
         self.namespace = namespace
         self.limit = limit
@@ -111,6 +117,9 @@ class RedisRateLimiter:
             raise RateLimiterUnavailable("shared rate-limit service is unavailable") from exc
         if not isinstance(result, (list, tuple)) or len(result) != 2:
             raise RateLimiterUnavailable("shared rate-limit service returned an invalid response")
-        allowed, retry_after = int(result[0]), int(result[1])
+        try:
+            allowed, retry_after = int(result[0]), int(result[1])
+        except (TypeError, ValueError) as exc:
+            raise RateLimiterUnavailable("shared rate-limit service returned invalid counters") from exc
         if not allowed:
             raise RuntimeError(str(max(1, retry_after)))
