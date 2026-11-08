@@ -216,3 +216,12 @@ def test_pipeline_rejects_untrusted_dataset_signer(tmp_path):
     with pytest.raises(PermissionError,match="not trusted"):
         pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="untrusted")
     assert runner.command is None
+
+
+def test_pipeline_rejects_worker_dataset_not_covered_by_signed_manifest(tmp_path):
+    pipe,runner,candidate,trusted,_=make_pipe(tmp_path)
+    (trusted/"manifest.json").write_text(
+        json.dumps({"schema_version":2,"dataset":"other-evaluation.jsonl"}),encoding="utf-8")
+    with pytest.raises(PermissionError,match="covered by the signed dataset"):
+        pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="uncovered")
+    assert runner.command is None
