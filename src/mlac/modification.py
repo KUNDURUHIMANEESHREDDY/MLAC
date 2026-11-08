@@ -175,20 +175,23 @@ def _linear_neighbors(layers: Sequence[nn.Module], index: int) -> tuple[nn.Linea
     return previous, following
 
 
-def _assert_linear_context_safe(layers: Sequence[nn.Module], index: int) -> None:
+def _assert_linear_context_safe(
+    layers: Sequence[nn.Module], index: int, *, removing: bool = False
+) -> None:
     previous_index = next(
         (i for i in range(index - 1, -1, -1) if isinstance(layers[i], nn.Linear)),
         None,
     )
+    following_start = index + 1 if removing else index
     following_index = next(
-        (i for i in range(index, len(layers)) if isinstance(layers[i], nn.Linear)),
+        (i for i in range(following_start, len(layers)) if isinstance(layers[i], nn.Linear)),
         None,
     )
     ranges = []
     if previous_index is not None:
         ranges.append(layers[previous_index + 1:index])
     if following_index is not None:
-        ranges.append(layers[index:following_index])
+        ranges.append(layers[following_start:following_index])
     if any(
         not isinstance(layer, _SHAPE_PRESERVING_TYPES)
         for segment in ranges for layer in segment
@@ -312,7 +315,7 @@ def _remove_layer(module: nn.Sequential, config: Mapping[str, Any]) -> dict[str,
         raise ValueError("cannot remove the only layer from a Sequential")
     removed = layers[index]
     if isinstance(removed, nn.Linear):
-        _assert_linear_context_safe(layers, index)
+        _assert_linear_context_safe(layers, index, removing=True)
         previous, following = _linear_neighbors(layers, index)
         if previous is not None and following is not None and previous.out_features != following.in_features:
             raise ValueError(
