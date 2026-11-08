@@ -1,0 +1,4 @@
+{$MLAC_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy mlac:8000
+}
