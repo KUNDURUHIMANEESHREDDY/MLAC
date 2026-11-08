@@ -49,6 +49,7 @@ The library workflow connects a Master Intelligence plan to the existing control
         image=image,
         store=ExperimentStore("mlac-experiments.sqlite3"),
         trusted_worker_keys=trusted_worker_keys,
+        trusted_dataset_signers=trusted_dataset_signers,
         worker_identity_dir="./worker-identity",
         artifact_registry=ArtifactRegistry("./mlac-artifacts"),
     )
