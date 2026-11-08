@@ -89,7 +89,7 @@ def test_compiler_rejects_cycles_and_unknown_operators():
         graph_nodes=(GraphNode("a", "input"), GraphNode("b", "identity")),
         graph_edges=(GraphEdge("a", "b"), GraphEdge("b", "a")),
     )
-    with pytest.raises(ValueError, match="cyclic"):
+    with pytest.raises(ValueError, match="cycle"):
         compile_architecture(cyclic)
 
     unknown = Architecture(
