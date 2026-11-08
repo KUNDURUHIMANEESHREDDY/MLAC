@@ -7,6 +7,7 @@ def sample_architecture():
     return Architecture(name="tiny-transformer", family="transformer", framework="pytorch",
         dimensions={"parameter_count": 100_000, "module_count": 3},
         components=(Component("encoder.attn", "MultiheadAttention", {"num_heads": 4}),
+                    Component("encoder.mlp", "FeedForward", {"hidden_size": 128}),
                     Component("encoder.dropout", "Dropout", {"p": 0.1})),
         tensors=(TensorSpec("encoder.weight", (128, 128), "float32"),))
 
@@ -134,3 +135,56 @@ def test_decision_ranking_penalizes_risk_after_value_and_feasibility():
                      and plan.parameters["heads_to_prune"] == [0])
     assert low_risk < high_risk
     assert "Top-ranked proposal:" in report.reasoning_summary
+
+
+def test_structural_modification_proposals_are_bounded_and_allowlisted():
+    proposals = [
+        ("resize_attention_heads", {"num_heads": 2}),
+        ("resize_mlp_hidden", {"hidden_size": 96}),
+        ("set_mlp_activation", {"activation": "silu"}),
+        ("convert_mlp_to_moe", {"num_experts": 4, "top_k": 2, "expert_noise_std": 0.001}),
+    ]
+    for operation, parameters in proposals:
+        def provider(**kwargs):
+            return [{
+                "operation": operation,
+                "parameters": parameters,
+                "hypothesis": "Evaluate a bounded architecture edit.",
+                "rationale": "The architecture metadata exposes the required target.",
+                "expected_effect": {"quality": "measure", "latency": "measure"},
+                "falsification_criteria": ["Quality or performance violates policy"],
+                "risk": "medium", "estimated_value": 0.5, "feasibility": 0.8,
+            }]
+        report = MasterIntelligenceEngine(
+            backend=CallableReasoningBackend(provider), max_plans=10
+        ).plan(
+            model_id="m", architecture=sample_architecture(), objective="reduce latency"
+        )
+        assert any(plan.operation == operation and plan.parameters == parameters
+                   for plan in report.plans)
+
+
+def test_structural_modification_proposals_reject_invalid_values():
+    invalid = [
+        ("resize_attention_heads", {"num_heads": 0}),
+        ("resize_mlp_hidden", {"hidden_size": 100000}),
+        ("set_mlp_activation", {"activation": "custom"}),
+        ("convert_mlp_to_moe", {"num_experts": 2, "top_k": 3}),
+    ]
+    for operation, parameters in invalid:
+        def provider(**kwargs):
+            return [{
+                "operation": operation,
+                "parameters": parameters,
+                "hypothesis": "Try an invalid architecture edit.",
+                "rationale": "This must be rejected locally.",
+                "expected_effect": {"quality": "measure"},
+                "falsification_criteria": ["Validation rejects this proposal"],
+                "risk": "low", "estimated_value": 0.5, "feasibility": 0.8,
+            }]
+        with pytest.raises(ValueError):
+            MasterIntelligenceEngine(
+                backend=CallableReasoningBackend(provider), max_plans=10
+            ).plan(
+                model_id="m", architecture=sample_architecture(), objective="reduce latency"
+            )
