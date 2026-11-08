@@ -60,6 +60,20 @@ def test_lora_trains_only_adapter_parameters_and_preserves_source_model():
     assert any("lora_A" in key for key in result.checkpoint_state)
 
 
+def test_lora_initialization_and_training_are_reproducible():
+    dataset = make_dataset()
+    config = TrainingConfig(epochs=3, batch_size=16, learning_rate=0.02, scheduler="none", seed=91)
+    first = TrainingEngine().fit(
+        model=make_model(), dataset=dataset, mode="lora",
+        lora_targets=(LoRATarget("0", rank=2, alpha=4),), config=config,
+    )
+    second = TrainingEngine().fit(
+        model=make_model(), dataset=dataset, mode="lora",
+        lora_targets=(LoRATarget("0", rank=2, alpha=4),), config=config,
+    )
+    assert first.checkpoint_sha256 == second.checkpoint_sha256
+
+
 def test_dataset_rejects_split_overlap_and_invalid_sample_identity():
     train = TensorSplit(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]), ("a", "b", "c", "d"))
     overlap = TensorSplit(torch.randn(3, 2), torch.tensor([0, 1, 0]), ("x", "b", "y"))
