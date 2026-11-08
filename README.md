@@ -8,7 +8,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 
 - Framework-neutral architecture, component, and tensor representation.
 - Master Intelligence Engine with OpenAI Responses and OpenAI-compatible Chat Completions provider adapters, bounded proposal validation, deterministic diagnostics, risk-aware decision ranking, and a governed plan-to-candidate evaluation workflow for supported TransformerBlock modifications.
-- In-memory model registry and read-only inspector for trusted, instantiated PyTorch modules.
+- In-memory model registry by default, with an opt-in transactional SQLite store for API model/proposal metadata; read-only inspector for trusted, instantiated PyTorch modules.
 - Versioned dropout-configuration mutation on IR snapshots.
 - Proposal-only evolution controller and default-deny production mutation policy.
 - Executable TransformerBlock with fused QKV attention and attention-head pruning with weight migration.
@@ -32,7 +32,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
     pytest
     mlac version
 
-Optional API: install `pip install -e ".[api]"` and configure `MLAC_API_JWKS_URL`, `MLAC_API_ISSUER`, and `MLAC_API_AUDIENCE` from a trusted OIDC provider before running `mlac serve`. Every non-health route requires a signed bearer JWT with issuer, audience, subject, issued-at, and expiry claims. The API verifies signing keys through the configured JWKS endpoint and scopes models/proposals to the issuer plus subject. Missing identity configuration fails closed with HTTP 503.
+Optional API: install `pip install -e ".[api]"` and configure `MLAC_API_JWKS_URL`, `MLAC_API_ISSUER`, and `MLAC_API_AUDIENCE` from a trusted OIDC provider before running `mlac serve`. Every non-health route requires a signed bearer JWT with issuer, audience, subject, issued-at, and expiry claims. The API verifies signing keys through the configured JWKS endpoint and scopes models/proposals to the issuer plus subject. Set `MLAC_API_STATE_DB` to an absolute local file path to persist model/proposal metadata across restarts; otherwise state remains process-local. Missing identity configuration fails closed with HTTP 503. See `docs/API_STATE.md` for storage semantics and backup guidance.
 
 ## Master Intelligence planning
 
@@ -111,11 +111,11 @@ The pipeline can authorize only a candidate operation. It does not deploy or pro
 - Worker reports are trusted only to the extent that the reviewed, digest-pinned worker image and runtime are trusted.
 - Docker is not a complete defense against a compromised host, kernel, daemon, or runtime. Use a dedicated worker VM/host and stronger isolation for hostile code.
 - The optional API requires OIDC JWT authentication and issuer/subject ownership checks for every non-health route. Request bodies are capped at 1 MiB; pre-authentication requests are limited per peer before JWKS resolution, and authenticated principals have a separate process-local limit. The CLI disables proxy-header trust and rejects non-loopback binds.
-- The API registry and both rate limiters remain process-local and non-durable; they do not coordinate across workers. Each limiter has a bounded identity table, reclaims only expired windows, and fails closed rather than evicting an active principal when capacity is exhausted. Durable tenant-scoped storage, transactional migrations, distributed rate limiting, backup/restore, TLS gateway deployment, and deployed acceptance remain release blockers.
+- When `MLAC_API_STATE_DB` is configured, model/proposal metadata use a versioned SQLite schema, parameterized statements, owner-indexed reads, foreign-key cascades, WAL journaling, and full synchronous commits. The default remains process-local. API rate limiters remain process-local and do not coordinate across workers; each has a bounded identity table and fails closed rather than evicting an active principal. SQLite backup/restore is an operator responsibility. The API remains loopback-only until distributed rate limiting, independent TLS gateway controls, backup/restore drills, and deployed acceptance are complete.
 - Trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
 - Host-side sandbox output collection uses descriptor-relative no-follow traversal and fails closed without POSIX openat/O_NOFOLLOW support; native Windows candidate evaluation is not yet supported.
 
-See docs/ARCHITECTURE.md and docs/PHASE4.md through docs/PHASE7.md.
+See docs/ARCHITECTURE.md, docs/API_STATE.md, and docs/PHASE4.md through docs/PHASE7.md.
 
 ## Roadmap
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import sys
 import time
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ from mlac.cli import is_loopback_host
 from mlac.evolution import EvolutionController
 from mlac.master_intelligence import MasterIntelligenceEngine
 from mlac.registry import ModelRegistry
+from mlac.sqlite_state import SQLiteStateStore
 
 ISSUER = "https://identity.example.test/"
 AUDIENCE = "mlac-api"
@@ -31,12 +33,13 @@ class StaticJWKClient:
         return SimpleNamespace(key=self.public_key)
 
 
-def make_client(*, rate_limit=60, pre_auth_rate_limit=120):
+def make_client(*, rate_limit=60, pre_auth_rate_limit=120, state_store=None):
     """Create an isolated API client and a helper for signed test tokens."""
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     app = create_app(
-        model_registry=ModelRegistry(),
-        evolution_controller=EvolutionController(),
+        model_registry=ModelRegistry() if state_store is None else None,
+        evolution_controller=EvolutionController() if state_store is None else None,
+        state_store=state_store,
         intelligence_engine=MasterIntelligenceEngine(),
         jwks_client=StaticJWKClient(private_key.public_key()),
         issuer=ISSUER,
@@ -317,6 +320,79 @@ def test_reasoning_provider_factory_rejects_unknown_provider(monkeypatch):
     """Fail fast rather than silently selecting an unintended provider."""
     from mlac.api import _default_intelligence_engine
 
-    monkeypatch.setenv("MLAC_REASONING_PROVIDER", "unknown-provider")
+    monkeypatch.setenv("MLAC_REASONING_PROVIDER", "unexpected")
     with pytest.raises(RuntimeError, match="MLAC_REASONING_PROVIDER"):
         _default_intelligence_engine()
+
+
+def test_sqlite_api_state_survives_restart_and_keeps_principals_isolated(tmp_path):
+    """Persist model/proposal metadata across app recreation without crossing tenants."""
+    database = tmp_path / "api-state.sqlite3"
+    first_client, first_token = make_client(state_store=SQLiteStateStore(database))
+    alice = auth(first_token("alice"))
+
+    created = first_client.post("/models", headers=alice, json=architecture())
+    assert created.status_code == 200
+    model_id = created.json()["model_id"]
+    proposal = first_client.post(
+        f"/models/{model_id}/proposals",
+        headers=alice,
+        json={
+            "hypothesis": "A smaller dropout value improves validation quality",
+            "operation": "dropout",
+            "parameters": {"probability": 0.05},
+        },
+    )
+    assert proposal.status_code == 200
+    assert first_client.get("/ready").json()["storage"] == "sqlite"
+
+    second_client, second_token = make_client(state_store=SQLiteStateStore(database))
+    assert len(second_client.get("/models", headers=auth(second_token("alice"))).json()) == 1
+    assert second_client.get("/models", headers=auth(second_token("bob"))).json() == []
+    assert len(second_client.get("/proposals", headers=auth(second_token("alice"))).json()) == 1
+    assert second_client.get("/proposals", headers=auth(second_token("bob"))).json() == []
+
+
+def test_sqlite_proposal_listing_decodes_only_authenticated_owner_rows(tmp_path):
+    """Keep corrupt proposal metadata from another tenant out of this owner's query."""
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    client, token = make_client(state_store=store)
+    alice = auth(token("alice"))
+    bob = auth(token("bob"))
+
+    alice_model = client.post("/models", headers=alice, json=architecture()).json()
+    bob_model = client.post("/models", headers=bob, json=architecture()).json()
+    alice_proposal = client.post(
+        f"/models/{alice_model['model_id']}/proposals",
+        headers=alice,
+        json={
+            "hypothesis": "Alice's proposal remains readable",
+            "operation": "dropout",
+            "parameters": {"probability": 0.05},
+        },
+    ).json()
+    bob_proposal = client.post(
+        f"/models/{bob_model['model_id']}/proposals",
+        headers=bob,
+        json={
+            "hypothesis": "Bob's proposal is isolated",
+            "operation": "dropout",
+            "parameters": {"probability": 0.15},
+        },
+    ).json()
+
+    connection = sqlite3.connect(store.path)
+    try:
+        connection.execute(
+            "UPDATE proposals SET parameters_json = ? WHERE proposal_id = ?",
+            ("not-json", bob_proposal["proposal_id"]),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    response = client.get("/proposals", headers=alice)
+    assert response.status_code == 200
+    assert [item["proposal_id"] for item in response.json()] == [
+        alice_proposal["proposal_id"]
+    ]
