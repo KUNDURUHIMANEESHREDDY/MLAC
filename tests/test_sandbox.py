@@ -127,3 +127,33 @@ def test_output_collection_rejects_invalid_limit(tmp_path):
     output.mkdir()
     with pytest.raises(ValueError, match="non-negative integer"):
         _read_output_files(output, True)
+
+
+def test_output_collection_fails_closed_without_descriptor_relative_nofollow(monkeypatch, tmp_path):
+    import mlac.sandbox as sandbox
+
+    monkeypatch.setattr(
+        sandbox.os,
+        "supports_dir_fd",
+        set(sandbox.os.supports_dir_fd) - {sandbox.os.open},
+    )
+    with pytest.raises(RuntimeError, match="openat and O_NOFOLLOW"):
+        sandbox._read_output_files(tmp_path, 1024)
+
+
+def test_runner_checks_safe_output_support_before_starting_docker(monkeypatch, tmp_path):
+    import mlac.sandbox as sandbox
+
+    monkeypatch.setattr(
+        sandbox.os,
+        "supports_dir_fd",
+        set(sandbox.os.supports_dir_fd) - {sandbox.os.open},
+    )
+    monkeypatch.setattr(
+        sandbox.shutil,
+        "which",
+        lambda _: pytest.fail("Docker must not be inspected or started"),
+    )
+    runner = DockerSandboxRunner(image=DIGEST_IMAGE)
+    with pytest.raises(RuntimeError, match="openat and O_NOFOLLOW"):
+        runner.run(candidate_dir=tmp_path, command=["/worker"])
