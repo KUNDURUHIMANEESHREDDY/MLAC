@@ -134,8 +134,9 @@ def test_invalid_schema_and_invalid_tensor_shapes_are_rejected():
 
 
 def test_public_package_exposes_ir_graph_types_and_lazy_adapters():
-    from mlac import IRGraphEdge, IRGraphNode, apply_weight_transformations, compile_architecture
+    from mlac import IR_SCHEMA_VERSION, IRGraphEdge, IRGraphNode, apply_weight_transformations, compile_architecture
 
+    assert IR_SCHEMA_VERSION == 1
     assert IRGraphNode("input", "input").operation == "input"
     assert IRGraphEdge("input", "output").source == "input"
     assert callable(compile_architecture)
