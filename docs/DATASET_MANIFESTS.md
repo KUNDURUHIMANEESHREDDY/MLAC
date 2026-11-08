@@ -63,9 +63,13 @@ record and worker input manifest.
 - A valid signature establishes that a trusted signer approved the manifest;
   it does not establish dataset licensing, correctness, representativeness,
   contamination status, or quality.
-- This module verifies local files against a signed manifest. Wiring the
-  verified manifest digest into every training and evaluation pipeline is a
-  separate integration step; do not claim automatic enforcement until that
-  integration is deployed.
+- The Training Engine accepts an optional `SignedDatasetBinding` and
+  verifies its signature, file hashes, revision, and train/validation/test
+  split declarations before starting a run. It records the manifest digest and
+  signer ID in the training evidence.
+- Other training/evaluation workflows do not automatically enforce this
+  manifest. The in-memory tensor loader remains trusted controller-side code;
+  file-level signing does not prove that preprocessing mapped source files to
+  tensors correctly.
 - The manifest records file-level hashes and split membership. It does not
   normalize JSONL, CSV, tokenizer, prompt, or preprocessing semantics.
