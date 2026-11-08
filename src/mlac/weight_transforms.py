@@ -125,7 +125,12 @@ def _validate_parameter_shape(name: str, value: Tensor,
             raise ValueError(
                 f"parameter {name!r} shape {tuple(value.shape)} does not match declared shape {spec.shape}"
             )
-    if mapping.shape and tuple(mapping.shape) != tuple(value.shape):
+    if mapping.shape and (
+        len(mapping.shape) != value.ndim or any(
+            isinstance(expected, int) and actual != expected
+            for actual, expected in zip(value.shape, mapping.shape)
+        )
+    ):
         raise ValueError(f"parameter {name!r} violates its parameter mapping shape contract")
     if spec.dtype != "unknown":
         expected_dtype = _TORCH_DTYPES.get(spec.dtype.lower())
