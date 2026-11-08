@@ -44,6 +44,10 @@ class TensorSplit:
         count = self.inputs.shape[0]
         if count < 1 or count > 100_000:
             raise ValueError("each split must contain between 1 and 100000 examples")
+        if self.inputs.numel() * self.inputs.element_size() > 256 * 1024 * 1024:
+            raise ValueError("each input split is limited to 256 MiB")
+        if self.labels is not None and self.labels.numel() * self.labels.element_size() > 16 * 1024 * 1024:
+            raise ValueError("each label split is limited to 16 MiB")
         if self.labels is not None:
             if not isinstance(self.labels, Tensor) or self.labels.device.type != "cpu" or self.labels.shape != (count,):
                 raise ValueError("labels must be an integer tensor with shape [N]")
@@ -95,7 +99,7 @@ class TrainingDataset:
                 value = tensor.detach().cpu().contiguous()
                 digest.update(str(value.dtype).encode("ascii"))
                 digest.update(str(tuple(value.shape)).encode("ascii"))
-                digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
+                _update_tensor_digest(digest, value)
         return digest.hexdigest()
 
 
@@ -136,12 +140,14 @@ class TrainingConfig:
     temperature: float = 2.0
     distillation_alpha: float = 0.5
     max_steps: int = 100_000
+    max_parameters: int = 25_000_000
 
     def __post_init__(self) -> None:
         integer_bounds = {
             "epochs": (1, 100), "batch_size": (1, 1024),
             "step_size": (1, 100), "patience": (1, 20),
             "seed": (0, 2**31 - 1), "max_steps": (1, 1_000_000),
+            "max_parameters": (1, 25_000_000),
         }
         for name, (low, high) in integer_bounds.items():
             value = getattr(self, name)
@@ -206,6 +212,14 @@ class TrainingResult:
             "heldout_examples": self.heldout_examples,
             "lora_targets": list(self.lora_targets),
         }
+
+
+def _update_tensor_digest(digest: Any, value: Tensor) -> None:
+    """Hash raw CPU tensor bytes without requiring NumPy or large byte copies."""
+    raw = value.reshape(-1).view(torch.uint8)
+    chunk_size = 1024 * 1024
+    for offset in range(0, raw.numel(), chunk_size):
+        digest.update(bytes(raw[offset:offset + chunk_size].tolist()))
 
 
 def _state_digest(state: Mapping[str, Tensor]) -> str:
@@ -281,6 +295,11 @@ class TrainingEngine:
         total_steps = config.epochs * math.ceil(dataset.train.inputs.shape[0] / config.batch_size)
         if total_steps > config.max_steps:
             raise ValueError("training schedule exceeds max_steps")
+        model_parameters = sum(parameter.numel() for parameter in model.parameters())
+        if model_parameters > config.max_parameters:
+            raise ValueError("model exceeds max_parameters")
+        if teacher is not None and sum(parameter.numel() for parameter in teacher.parameters()) > config.max_parameters:
+            raise ValueError("teacher exceeds max_parameters")
         if dataset.train.labels is None or dataset.validation.labels is None or dataset.heldout.labels is None:
             raise ValueError("labels are required for all splits")
 
