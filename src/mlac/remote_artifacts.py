@@ -57,6 +57,7 @@ class S3ObjectLockArtifactStore:
         if now.tzinfo is None:
             raise ValueError("clock must return a timezone-aware datetime")
         retain_until = now.astimezone(timezone.utc) + timedelta(days=self.retention_days)
+        created_new = True
         try:
             response = self.client.put_object(
                 Bucket=self.bucket, Key=key, Body=data, ContentType=media_type,
@@ -67,6 +68,7 @@ class S3ObjectLockArtifactStore:
             status = getattr(exc, "response", {}).get("ResponseMetadata", {}).get("HTTPStatusCode")
             if status != 412:
                 raise
+            created_new = False
             if self.get_bytes(digest) != data:
                 raise RuntimeError("content-address collision or corrupted remote object") from exc
             version_id = self.client.head_object(Bucket=self.bucket, Key=key).get("VersionId")
@@ -78,8 +80,8 @@ class S3ObjectLockArtifactStore:
         if head.get("ObjectLockMode") != "COMPLIANCE":
             raise RuntimeError("remote object is not protected by COMPLIANCE retention")
         actual = head.get("ObjectLockRetainUntilDate")
-        if actual is None or actual < retain_until:
-            raise RuntimeError("remote object retention is shorter than requested")
+        if actual is None or (actual < retain_until and created_new) or (not created_new and actual <= now):
+            raise RuntimeError("remote object retention is shorter than requested or has expired")
         return RemoteArtifact(digest, len(data), self.bucket, key, version_id,
                               actual.astimezone(timezone.utc).isoformat(), "COMPLIANCE")
 
