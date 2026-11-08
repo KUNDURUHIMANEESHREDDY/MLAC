@@ -66,6 +66,13 @@ Run a backup manually:
 
 Schedule the same command from a restricted host scheduler (for example, a systemd timer) at the recovery-point objective approved by the operator. Alert on non-zero exit status and on a missing recent backup. The backup role should have only the required bucket inspection and object upload permissions; it must not be able to shorten Object Lock retention or delete protected versions.
 
+Before starting a restore drill, verify every downloaded backup against the SHA-256 value read from trusted S3 object metadata (not a digest copied from the backup file itself):
+
+    python /app/scripts/verify_backup.py /secure/restore/api-state.sqlite3 --sha256 "$EXPECTED_SHA256"
+    python /app/scripts/verify_backup.py /secure/restore/api-state.dump --sha256 "$EXPECTED_SHA256" --format postgres-custom
+
+The verifier rejects symlinks and non-regular files, checks the expected SHA-256 in bounded-memory chunks, and detects only the SQLite and PostgreSQL custom formats emitted by this utility. SQLite is opened read-only with immutable/query-only settings and checked with PRAGMA integrity_check. PostgreSQL custom archives are inspected with pg_restore --list; no SQL is executed. A successful result proves digest and archive/database structural checks only. It does not restore data or prove application-level recovery; the isolated restore drill below remains mandatory.
+
 Restore drills must be performed in an isolated environment. Download a retained backup and verify its SHA-256 against trusted backup metadata. For PostgreSQL, validate the archive with pg_restore --list, stop the API, and restore with pg_restore --no-owner --no-acl --clean --if-exists --exit-on-error. For SQLite, run PRAGMA integrity_check and restore while the API is stopped. Then verify /ready, tenant isolation, and representative model/proposal reads. Record the achieved recovery point and recovery time.
 
 ## Rollback and recovery
