@@ -316,7 +316,7 @@ def create_app(
     bearer = HTTPBearer(auto_error=False)
     app = FastAPI(
         title="MLAC",
-        version="0.8.0",
+        version="1.0.0",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
