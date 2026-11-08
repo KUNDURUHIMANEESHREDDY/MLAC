@@ -7,7 +7,7 @@ import json
 import sys
 from typing import Any
 
-REQUIRED_CHECKS = ("pytest", "Analyze (python)", "Analyze (actions)")
+REQUIRED_CHECKS = ("pytest", "CodeQL", "Analyze (python)", "Analyze (actions)")
 
 
 def evaluate_check_runs(payload: Any, expected_sha: str) -> tuple[str, list[str]]:
