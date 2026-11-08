@@ -70,10 +70,19 @@ def load_candidate(config: dict, baseline_path: Path, candidate_path: Path, mani
             raise ValueError("profile measurement_iterations must be between 1 and 1000")
         candidate = baseline
     elif operation == "prune_attention_heads":
-        if set(params) != {"module_name", "heads_to_prune"} or params["module_name"] != "attention":
-            raise ValueError("prune manifest must target only top-level attention")
+        heads = params.get("heads_to_prune")
+        if (
+            set(params) != {"module_name", "heads_to_prune"}
+            or params["module_name"] != "attention"
+            or not isinstance(heads, list) or not heads
+            or any(isinstance(head, bool) or not isinstance(head, int) or head < 0 for head in heads)
+            or len(set(heads)) != len(heads)
+            or any(head >= baseline.attention.num_heads for head in heads)
+            or len(heads) >= baseline.attention.num_heads
+        ):
+            raise ValueError("prune manifest must contain unique in-range heads for top-level attention")
         candidate = modify_model(
-            baseline, Modification("prune_attention_heads", {"heads": params["heads_to_prune"]})
+            baseline, Modification("prune_attention_heads", {"heads": heads})
         ).module
     elif operation == "resize_attention_heads":
         count = params.get("num_heads")
@@ -91,7 +100,7 @@ def load_candidate(config: dict, baseline_path: Path, candidate_path: Path, mani
         ).module
     elif operation == "set_mlp_activation":
         activation = params.get("activation")
-        if set(params) != {"activation"} or activation not in {"gelu", "relu", "silu", "tanh"}:
+        if set(params) != {"activation"} or not isinstance(activation, str) or activation not in {"gelu", "relu", "silu", "tanh"}:
             raise ValueError("set_mlp_activation manifest is invalid")
         candidate = modify_model(
             baseline, Modification("set_mlp_activation", {"activation": activation})
