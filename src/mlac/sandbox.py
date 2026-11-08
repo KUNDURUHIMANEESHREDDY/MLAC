@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 import uuid
@@ -19,6 +20,123 @@ from typing import Mapping, Sequence
 
 _IMAGE_DIGEST = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+
+def _require_safe_output_collection() -> None:
+    required = (
+        os.open in os.supports_dir_fd
+        and os.stat in os.supports_dir_fd
+        and os.listdir in os.supports_fd
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+    )
+    if not required:
+        raise RuntimeError(
+            "safe sandbox output collection requires descriptor-relative "
+            "openat and O_NOFOLLOW support; refusing path-based fallback"
+        )
+
+
+def _read_output_files(output: Path, max_bytes: int) -> dict[str, bytes]:
+    """Read regular output files using descriptor-relative, no-follow opens.
+
+    The output directory is writable by the container. Path-based checks such
+    as is_symlink() followed by read_bytes() are vulnerable to replacement
+    between the check and open. Pin each directory and open every child relative
+    to its parent descriptor with O_NOFOLLOW instead.
+    """
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
+        raise ValueError("max_bytes must be a non-negative integer")
+
+    _require_safe_output_collection()
+
+    close_on_exec = getattr(os, "O_CLOEXEC", 0)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | close_on_exec
+    file_flags = (
+        os.O_RDONLY
+        | os.O_NOFOLLOW
+        | getattr(os, "O_NONBLOCK", 0)
+        | close_on_exec
+    )
+
+    root_fd = os.open(output, directory_flags)
+    output_files: dict[str, bytes] = {}
+    total = 0
+
+    def visit(directory_fd: int, prefix: str) -> None:
+        nonlocal total
+        for name in os.listdir(directory_fd):
+            if name in {".", ".."} or os.sep in name or (os.altsep and os.altsep in name):
+                continue
+            relative = f"{prefix}/{name}" if prefix else name
+            try:
+                before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                continue
+
+            if stat.S_ISDIR(before.st_mode):
+                try:
+                    child_fd = os.open(name, directory_flags, dir_fd=directory_fd)
+                except OSError:
+                    continue
+                try:
+                    opened = os.fstat(child_fd)
+                    if (
+                        stat.S_ISDIR(opened.st_mode)
+                        and (opened.st_dev, opened.st_ino) == (before.st_dev, before.st_ino)
+                    ):
+                        visit(child_fd, relative)
+                finally:
+                    os.close(child_fd)
+                continue
+
+            if not stat.S_ISREG(before.st_mode):
+                continue
+
+            try:
+                file_fd = os.open(name, file_flags, dir_fd=directory_fd)
+            except OSError:
+                continue
+            try:
+                opened = os.fstat(file_fd)
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+                ):
+                    continue
+
+                remaining = max_bytes - total
+                if opened.st_size > remaining:
+                    raise RuntimeError(
+                        "Sandbox output exceeded configured output_bytes limit"
+                    )
+
+                data = bytearray()
+                while True:
+                    chunk = os.read(file_fd, min(64 * 1024, remaining - len(data) + 1))
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    if len(data) > remaining:
+                        raise RuntimeError(
+                            "Sandbox output exceeded configured output_bytes limit"
+                        )
+                output_files[relative] = bytes(data)
+                total += len(data)
+            finally:
+                os.close(file_fd)
+
+    try:
+        root_stat = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise RuntimeError("Sandbox output root is not a directory")
+        visit(root_fd, "")
+    finally:
+        os.close(root_fd)
+
+    return output_files
 
 
 @dataclass(frozen=True)
@@ -126,6 +244,7 @@ class DockerSandboxRunner:
         ):
             raise ValueError("command must be a non-empty argv sequence of valid strings")
 
+        _require_safe_output_collection()
         docker = shutil.which(self.docker_executable)
         if docker is None:
             raise RuntimeError("Docker executable is unavailable; refusing unsafe fallback")
@@ -205,20 +324,7 @@ class DockerSandboxRunner:
 
             stdout = stdout_path.read_bytes()[: self.limits.output_bytes].decode("utf-8", "replace")
             stderr = stderr_path.read_bytes()[: self.limits.output_bytes].decode("utf-8", "replace")
-            output_files: dict[str, bytes] = {}
-            total = 0
-            for current, dirs, names in os.walk(output, followlinks=False):
-                dirs[:] = [name for name in dirs if not (Path(current) / name).is_symlink()]
-                for name in names:
-                    path = Path(current) / name
-                    if path.is_symlink() or not path.is_file():
-                        continue
-                    relative = path.relative_to(output).as_posix()
-                    data = path.read_bytes()
-                    total += len(data)
-                    if total > self.limits.output_bytes:
-                        raise RuntimeError("Sandbox output exceeded configured output_bytes limit")
-                    output_files[relative] = data
+            output_files = _read_output_files(output, self.limits.output_bytes)
 
             return SandboxResult(
                 exit_code=exit_code,
