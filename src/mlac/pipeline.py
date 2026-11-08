@@ -19,6 +19,7 @@ from mlac.experiments import ExperimentStore
 from mlac.governance import GovernancePolicy
 from mlac.runtime_identity import RuntimeIdentityVerifier
 
+
 class SandboxRunner(Protocol):
     def run(self, *, candidate_dir: str | Path, command: list[str],
             trusted_dir: str | Path | None = None,
@@ -207,7 +208,7 @@ class CandidateEvaluationPipeline:
         if not isinstance(worker_manifest,dict):
             raise TypeError("worker manifest must be a JSON object")
         if isinstance(worker_manifest.get("schema_version"), bool):
-            raise ValueError("worker manifest schema_version must be integer 1 or 2")
+            raise TypeError("worker manifest schema_version must be integer 1 or 2")
         if worker_manifest.get("schema_version")==2:
             required_dataset_files=[worker_manifest.get("dataset")]
         elif worker_manifest.get("schema_version")==1:
