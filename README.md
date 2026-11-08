@@ -96,3 +96,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+
+## Safety kernel (Phase 4)
+
+The `mlac.safety` module pins guardrail policy digests, detects in-process policy-object tampering, permits only monotonic tightening, and denies production operations by default. If production is explicitly enabled by an external deployment configuration, it requires a time-limited HMAC-signed approval scoped to the exact model and operation. Signing keys must remain in a separate operator service/KMS. This is an application-level control, not a sandbox or protection against arbitrary code execution in the same process; see [Phase 4 safety notes](docs/PHASE4.md).
