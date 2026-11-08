@@ -155,7 +155,7 @@ class SQLiteStateStore:
         metadata = dict(record.metadata or {})
         owner = metadata.get("owner", "")
         if not isinstance(owner, str):
-            raise ValueError("model owner must be a string")
+            raise TypeError("model owner must be a string")
         architecture_json = self._encode(record.architecture.to_dict(), field="architecture")
         metadata_json = self._encode(metadata, field="model metadata")
         connection = self._connect()
