@@ -106,7 +106,7 @@ class CallableReasoningBackend:
 class MasterIntelligenceEngine:
     """Turns model goals into ranked, constrained, auditable experiment proposals."""
 
-    ALLOWED_OPERATIONS = {"profile_model", "prune_attention_heads"}
+    ALLOWED_OPERATIONS = {"profile_model", "prune_attention_heads", "resize_attention_heads", "resize_mlp_hidden", "set_mlp_activation", "convert_mlp_to_moe"}
     MEASUREMENTS = ("task_quality", "latency", "parameter_count", "peak_memory", "finite_outputs")
 
     def __init__(self, *, backend: ReasoningBackend | None = None,
@@ -264,6 +264,60 @@ class MasterIntelligenceEngine:
                 raise ValueError(
                     f"proposal {index}: pruned head indices must be unique, in range, and leave at least one head"
                 )
+        elif operation == "resize_attention_heads":
+            if set(params) != {"num_heads"}:
+                raise ValueError(f"proposal {index}: resize_attention_heads requires only num_heads")
+            count = params["num_heads"]
+            if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 128:
+                raise ValueError(f"proposal {index}: num_heads must be an integer from 1 to 128")
+            if not any(
+                "attention" in item.kind.lower() or "attn" in item.name.lower()
+                for item in architecture.components
+            ):
+                raise ValueError(f"proposal {index}: no inspected attention component is available")
+            params = {"num_heads": count}
+        elif operation == "resize_mlp_hidden":
+            if set(params) != {"hidden_size"}:
+                raise ValueError(f"proposal {index}: resize_mlp_hidden requires only hidden_size")
+            width = params["hidden_size"]
+            if isinstance(width, bool) or not isinstance(width, int) or not 1 <= width <= 65536:
+                raise ValueError(f"proposal {index}: hidden_size must be an integer from 1 to 65536")
+            if not any(
+                "mlp" in item.name.lower() or "feedforward" in item.name.lower()
+                for item in architecture.components
+            ):
+                raise ValueError(f"proposal {index}: no inspected MLP component is available")
+            params = {"hidden_size": width}
+        elif operation == "set_mlp_activation":
+            if set(params) != {"activation"}:
+                raise ValueError(f"proposal {index}: set_mlp_activation requires only activation")
+            activation = params["activation"]
+            if activation not in {"gelu", "relu", "silu", "tanh"}:
+                raise ValueError(f"proposal {index}: unsupported MLP activation")
+            if not any(
+                "mlp" in item.name.lower() or "feedforward" in item.name.lower()
+                for item in architecture.components
+            ):
+                raise ValueError(f"proposal {index}: no inspected MLP component is available")
+            params = {"activation": activation}
+        elif operation == "convert_mlp_to_moe":
+            allowed = {"num_experts", "top_k", "expert_noise_std"}
+            if set(params) - allowed or not {"num_experts", "top_k"}.issubset(params):
+                raise ValueError(f"proposal {index}: convert_mlp_to_moe requires num_experts and top_k")
+            experts, top_k = params["num_experts"], params["top_k"]
+            noise = params.get("expert_noise_std", 1e-3)
+            if isinstance(experts, bool) or not isinstance(experts, int) or not 2 <= experts <= 32:
+                raise ValueError(f"proposal {index}: num_experts must be an integer from 2 to 32")
+            if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= experts:
+                raise ValueError(f"proposal {index}: top_k must be an integer from 1 to num_experts")
+            if isinstance(noise, bool) or not isinstance(noise, (int, float)) or not math.isfinite(noise) or not 0 <= noise <= 0.05:
+                raise ValueError(f"proposal {index}: expert_noise_std must be between 0 and 0.05")
+            if not any(
+                "mlp" in item.name.lower() or "feedforward" in item.name.lower()
+                for item in architecture.components
+            ):
+                raise ValueError(f"proposal {index}: no inspected MLP component is available")
+            params = {"num_experts": experts, "top_k": top_k, "expert_noise_std": float(noise)}
         else:
             allowed = {"warmup_iterations", "measurement_iterations"}
             if set(params) - allowed:
@@ -284,102 +338,3 @@ class MasterIntelligenceEngine:
                 raise ValueError(f"proposal {index}: measurement_iterations must be an integer from 1 to 1000")
             params = {"warmup_iterations": warmup, "measurement_iterations": iterations}
 
-        for key in ("hypothesis", "rationale"):
-            value_text = raw.get(key)
-            if not isinstance(value_text, str) or not value_text.strip() or len(value_text) > 2000:
-                raise ValueError(f"proposal {index}: {key} must be a non-empty string of at most 2000 characters")
-        expected = raw.get("expected_effect", {})
-        criteria = raw.get("falsification_criteria", [])
-        if not isinstance(expected, Mapping) or not expected or len(expected) > 12:
-            raise ValueError(f"proposal {index}: expected_effect must be a non-empty object with at most 12 entries")
-        if any(
-            not isinstance(key, str)
-            or not key.strip()
-            or not isinstance(value, str)
-            or not value.strip()
-            or len(value) > 500
-            for key, value in expected.items()
-        ):
-            raise ValueError(f"proposal {index}: expected_effect keys and values must be bounded non-empty strings")
-        if (
-            not isinstance(criteria, list)
-            or not 1 <= len(criteria) <= 12
-            or any(not isinstance(item, str) or not item.strip() or len(item) > 500 for item in criteria)
-        ):
-            raise ValueError(f"proposal {index}: provide 1 to 12 bounded falsification criteria")
-        risk = raw.get("risk", "medium")
-        if risk not in {"low", "medium", "high"}:
-            raise ValueError(f"proposal {index}: risk must be low, medium, or high")
-        raw_value = raw.get("estimated_value", 0.5)
-        raw_feasibility = raw.get("feasibility", 0.5)
-        if isinstance(raw_value, bool) or isinstance(raw_feasibility, bool):
-            raise ValueError(f"proposal {index}: value and feasibility must be finite numbers from 0 to 1")
-        value, feasibility = float(raw_value), float(raw_feasibility)
-        if (
-            not math.isfinite(value)
-            or not math.isfinite(feasibility)
-            or not 0 <= value <= 1
-            or not 0 <= feasibility <= 1
-        ):
-            raise ValueError(f"proposal {index}: value and feasibility must be finite numbers from 0 to 1")
-        hypothesis = ExperimentHypothesis(
-            raw["hypothesis"],
-            raw["rationale"],
-            {str(key): str(value) for key, value in expected.items()},
-            tuple(criteria),
-        )
-        return ExperimentPlan(
-            str(uuid4()), objective, hypothesis, operation, dict(params),
-            self.MEASUREMENTS, risk, value, feasibility,
-        )
-
-    def plan(self, *, model_id: str, architecture: Architecture | Mapping[str, Any],
-             objective: str, constraints: Mapping[str, float] | None = None) -> IntelligenceReport:
-        if not isinstance(model_id, str) or not model_id.strip():
-            raise ValueError("model_id must be non-empty")
-        arch = self._architecture(architecture)
-        goal = self.parse_objective(objective, constraints=constraints)
-        diagnoses = self.diagnose(arch, goal)
-        raw_plans = self._rule_plans(arch, goal)
-        planner = "rules"
-        if self.backend is not None:
-            proposals = self.backend.propose(objective=asdict(goal), architecture=arch.to_dict(),
-                diagnoses=[asdict(d) for d in diagnoses],
-                constraints={"allowed_operations": sorted(self.ALLOWED_OPERATIONS),
-                             "max_parameter_growth_ratio": self.max_parameter_growth_ratio})
-            if not isinstance(proposals, list):
-                raise ValueError("reasoning backend must return a list")
-            if len(proposals) > min(100, self.max_plans * 10):
-                raise ValueError("reasoning backend returned too many proposals")
-            raw_plans.extend(proposals)
-            planner = "rules+llm"
-        plans, seen = [], set()
-        for index, raw in enumerate(raw_plans):
-            plan = self._validate_proposal(raw, goal, arch, index)
-            fingerprint = json.dumps([plan.operation, plan.parameters], sort_keys=True, default=str)
-            if fingerprint not in seen:
-                plans.append(plan)
-                seen.add(fingerprint)
-        risk_weight = {"low": 1.0, "medium": 0.85, "high": 0.6}
-        plans.sort(
-            key=lambda plan: (
-                plan.estimated_value * plan.feasibility * risk_weight[plan.risk],
-                plan.feasibility,
-                plan.estimated_value,
-            ),
-            reverse=True,
-        )
-        plans = plans[:self.max_plans]
-        recommendation = (
-            f" Top-ranked proposal: {plans[0].operation} "
-            f"(risk={plans[0].risk}, estimated utility="
-            f"{plans[0].estimated_value * plans[0].feasibility * risk_weight[plans[0].risk]:.3f})."
-            if plans else " No valid experiment proposal was produced."
-        )
-        summary = (
-            f"Analyzed {len(arch.components)} components and {len(arch.tensors)} tensors. "
-            f"Found {len(diagnoses)} diagnostic signals and ranked {len(plans)} experiment plans."
-            f"{recommendation} Plans are proposals; execution, evaluation, and authorization remain separate."
-        )
-        return IntelligenceReport(str(uuid4()), model_id, arch.name, goal,
-            tuple(diagnoses), tuple(plans), summary, planner)
