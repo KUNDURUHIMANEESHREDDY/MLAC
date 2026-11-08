@@ -95,6 +95,19 @@ def _copy_backup_snapshot(backup_path: Path, snapshot_path: Path) -> None:
         os.close(source_descriptor)
 
 
+def _reject_existing_sqlite_sidecars(target: Path) -> None:
+    """Refuse to open a destination whose SQLite sidecar names are already occupied."""
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = target.with_name(target.name + suffix)
+        try:
+            sidecar.lstat()
+        except FileNotFoundError:
+            continue
+        raise FileExistsError(
+            f"refusing to restore when SQLite sidecar already exists: {sidecar.name}"
+        )
+
+
 def restore_sqlite_backup(
     backup_path: Path,
     destination_path: Path,
@@ -144,6 +157,7 @@ def restore_sqlite_backup(
                 "archives into a dedicated disposable database using the operator runbook"
             )
 
+        _reject_existing_sqlite_sidecars(target)
         flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW
         if hasattr(os, "O_CLOEXEC"):
             flags |= os.O_CLOEXEC
@@ -163,6 +177,8 @@ def restore_sqlite_backup(
             source: sqlite3.Connection | None = None
             restored: sqlite3.Connection | None = None
             try:
+                # Recheck after exclusive target creation and before SQLite can touch sidecars.
+                _reject_existing_sqlite_sidecars(target)
                 source_uri = snapshot.resolve(strict=True).as_uri() + "?mode=ro&immutable=1"
                 source = sqlite3.connect(source_uri, uri=True, timeout=10)
                 restored = sqlite3.connect(target, timeout=10)
