@@ -74,6 +74,40 @@ def test_lora_initialization_and_training_are_reproducible():
     assert first.checkpoint_sha256 == second.checkpoint_sha256
 
 
+def test_sequence_logits_support_token_distillation_and_lora_training():
+    class TinyLanguageModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embedding = nn.Embedding(13, 8)
+            self.proj = nn.Linear(8, 13)
+
+        def forward(self, token_ids):
+            return self.proj(self.embedding(token_ids))
+
+    generator = torch.Generator().manual_seed(8)
+    splits = []
+    for prefix, count in (("train", 24), ("validation", 8), ("heldout", 8)):
+        tokens = torch.randint(0, 13, (count, 5), generator=generator)
+        labels = torch.roll(tokens, shifts=-1, dims=1)
+        splits.append(TensorSplit(tokens, labels, tuple(f"{prefix}-{i}" for i in range(count))))
+    dataset = TrainingDataset(*splits, revision="token-sequence-v1")
+    teacher = TinyLanguageModel().eval()
+    config = TrainingConfig(epochs=2, batch_size=4, scheduler="none", seed=29)
+
+    distilled = TrainingEngine().fit(
+        model=TinyLanguageModel(), teacher=teacher, dataset=dataset,
+        mode="distillation", config=config,
+    )
+    lora = TrainingEngine().fit(
+        model=TinyLanguageModel(), dataset=dataset, mode="lora",
+        lora_targets=(LoRATarget("proj", rank=2, alpha=4),), config=config,
+    )
+    assert distilled.heldout_examples == 8
+    assert 0 <= distilled.heldout_accuracy <= 1
+    assert lora.heldout_examples == 8
+    assert lora.lora_targets == ("proj",)
+
+
 def test_dataset_rejects_split_overlap_and_invalid_sample_identity():
     train = TensorSplit(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]), ("a", "b", "c", "d"))
     overlap = TensorSplit(torch.randn(3, 2), torch.tensor([0, 1, 0]), ("x", "b", "y"))
