@@ -22,7 +22,7 @@ python -m scripts.restore_backup \
   --sha256 '<trusted-64-character-sha256>'
 ```
 
-The utility first calls `scripts.verify_backup` to verify the trusted digest and SQLite integrity. It then copies the database through SQLite's online backup API, runs `PRAGMA integrity_check` on the restored file, records the table count, and leaves the result with mode `0600`. It creates the destination with exclusive-create semantics and never replaces an existing file. It fsyncs both the restored file and its parent directory before reporting success. If verification or copying fails, it removes only the file it created.
+The utility first copies the downloaded backup through a single no-follow file descriptor into a private temporary directory. It checks that the source file identity and mutation-sensitive metadata remain stable while copying. It then runs `scripts.verify_backup` against that snapshot and restores from the exact same snapshot; changing or replacing the original download after verification cannot change the restored bytes. It runs `PRAGMA integrity_check` on the restored file, records the table count, and leaves the result with mode `0600`. It creates the destination with exclusive-create semantics and never replaces an existing file. It fsyncs both the restored file and its parent directory before reporting success. If verification or copying fails, it removes only the file it created.
 
 Inspect the restored database without enabling writes:
 
@@ -32,7 +32,7 @@ import sqlite3
 from pathlib import Path
 
 path = Path("./restore-drill/restored.sqlite3")
-with sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True) as db:
+with sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True) as db:
     print("integrity:", db.execute("PRAGMA integrity_check").fetchone()[0])
     print("tables:", db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
