@@ -369,20 +369,23 @@ class TrainingEngine:
             raise ValueError("labels are required for all splits")
         source_manifest_sha256 = None
         dataset_signer_id = None
-        if dataset.signed_manifest is not None:
-            from mlac.dataset_manifest import verify_signed_dataset_manifest
-            verified = verify_signed_dataset_manifest(
-                dict(dataset.signed_manifest.envelope),
-                dataset.signed_manifest.dataset_root,
-                trusted_signers=dataset.signed_manifest.trusted_signers,
-            )
-            if verified["revision"] != dataset.revision:
-                raise ValueError("signed dataset manifest revision does not match TrainingDataset revision")
-            split_names = {item["split"] for item in verified["verified_files"]}
-            if not {"train", "validation"}.issubset(split_names) or not ({"heldout", "test"} & split_names):
-                raise ValueError("signed dataset manifest must declare train, validation, and heldout/test splits")
-            source_manifest_sha256 = verified["manifest_sha256"]
-            dataset_signer_id = verified["signer_id"]
+        if dataset.signed_manifest is None:
+            raise PermissionError("training requires a trusted signed dataset manifest binding")
+        from mlac.dataset_manifest import verify_signed_dataset_manifest
+        verified = verify_signed_dataset_manifest(
+            dict(dataset.signed_manifest.envelope),
+            dataset.signed_manifest.dataset_root,
+            trusted_signers=dataset.signed_manifest.trusted_signers,
+        )
+        if verified["revision"] != dataset.revision:
+            raise ValueError("signed dataset manifest revision does not match TrainingDataset revision")
+        if verified.get("dataset_fingerprint") != dataset.digest:
+            raise PermissionError("signed dataset manifest fingerprint does not match materialized training tensors")
+        split_names = {item["split"] for item in verified["verified_files"]}
+        if not {"train", "validation"}.issubset(split_names) or not ({"heldout", "test"} & split_names):
+            raise ValueError("signed dataset manifest must declare train, validation, and heldout/test splits")
+        source_manifest_sha256 = verified["manifest_sha256"]
+        dataset_signer_id = verified["signer_id"]
 
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(config.seed)
