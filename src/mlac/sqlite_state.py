@@ -265,16 +265,31 @@ class SQLiteStateStore:
         finally:
             connection.close()
 
-    def list_proposals(self) -> list[dict[str, Any]]:
+    def list_proposals(self, *, owner: str | None = None) -> list[dict[str, Any]]:
+        """Return proposals, optionally filtering by the owning model principal."""
         connection = self._connect()
         try:
-            rows = connection.execute(
-                """
-                SELECT proposal_id, model_id, hypothesis, operation,
-                       parameters_json, status, created_at
-                FROM proposals ORDER BY created_at, proposal_id
-                """
-            ).fetchall()
+            if owner is None:
+                rows = connection.execute(
+                    """
+                    SELECT p.proposal_id, p.model_id, p.hypothesis, p.operation,
+                           p.parameters_json, p.status, p.created_at
+                    FROM proposals AS p
+                    ORDER BY p.created_at, p.proposal_id
+                    """
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT p.proposal_id, p.model_id, p.hypothesis, p.operation,
+                           p.parameters_json, p.status, p.created_at
+                    FROM proposals AS p
+                    JOIN models AS m ON m.model_id = p.model_id
+                    WHERE m.owner = ?
+                    ORDER BY p.created_at, p.proposal_id
+                    """,
+                    (owner,),
+                ).fetchall()
             return [
                 {
                     "proposal_id": row["proposal_id"],
