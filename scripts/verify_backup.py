@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import hmac
+import os
 import re
 import shutil
 import sqlite3
@@ -34,8 +35,7 @@ def _sha256(path: Path, expected_identity: tuple[int, int]) -> str:
     digest = hashlib.sha256()
     try:
         with path.open("rb") as backup:
-            opened = backup.fileno()
-            metadata = __import__("os").fstat(opened)
+            metadata = os.fstat(backup.fileno())
             if not stat.S_ISREG(metadata.st_mode):
                 raise ValueError("backup must be a regular file")
             if (metadata.st_dev, metadata.st_ino) != expected_identity:
@@ -107,11 +107,7 @@ def _verify_postgres(path: Path) -> None:
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()[:500]
         raise ValueError(f"pg_restore rejected the backup archive: {detail}")
-    entries = [
-        line
-        for line in result.stdout.splitlines()
-        if re.match(r"^\\d+;", line)
-    ]
+    entries = [line for line in result.stdout.splitlines() if re.match(r"^\d+;", line)]
     if not entries:
         raise ValueError("PostgreSQL archive contains no readable table-of-contents entries")
 
