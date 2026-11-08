@@ -85,12 +85,14 @@ def _create_database_backup(destination: Path) -> str:
     database = Path(sqlite_path or "")
     if not database.is_file() or database.is_symlink():
         raise RuntimeError("configured SQLite state database is not a regular file")
-    with sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True) as source:
-        with sqlite3.connect(destination) as target:
-            source.backup(target)
-            result = target.execute("PRAGMA integrity_check").fetchone()
-            if result is None or result[0] != "ok":
-                raise RuntimeError("SQLite backup integrity check failed")
+    with (
+        sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True) as source,
+        sqlite3.connect(destination) as target,
+    ):
+        source.backup(target)
+        result = target.execute("PRAGMA integrity_check").fetchone()
+        if result is None or result[0] != "ok":
+            raise RuntimeError("SQLite backup integrity check failed")
     return "sqlite"
 
 

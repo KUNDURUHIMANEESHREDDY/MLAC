@@ -69,7 +69,7 @@ class RedisRateLimiter:
         namespace: str,
         limit: int,
         window_seconds: float,
-    ) -> "RedisRateLimiter":
+    ) -> RedisRateLimiter:
         """Create a bounded-timeout Redis client from an operator-supplied URL."""
         try:
             from redis import Redis

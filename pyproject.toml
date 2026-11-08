@@ -25,6 +25,7 @@ packages = ["src/mlac"]
 "schemas/mlac-ir-v1.schema.json" = "mlac/schemas/mlac-ir-v1.schema.json"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "."]
 addopts = "-q"
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends"]

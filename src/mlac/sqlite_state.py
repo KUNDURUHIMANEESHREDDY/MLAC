@@ -124,7 +124,7 @@ class SQLiteStateStore:
         except (TypeError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"stored {field} JSON is invalid") from exc
         if not isinstance(decoded, dict):
-            raise RuntimeError(f"stored {field} must be a JSON object")
+            raise TypeError(f"stored {field} must be a JSON object")
         return decoded
 
     @staticmethod
@@ -155,7 +155,7 @@ class SQLiteStateStore:
         metadata = dict(record.metadata or {})
         owner = metadata.get("owner", "")
         if not isinstance(owner, str):
-            raise ValueError("model owner must be a string")
+            raise TypeError("model owner must be a string")
         architecture_json = self._encode(record.architecture.to_dict(), field="architecture")
         metadata_json = self._encode(metadata, field="model metadata")
         connection = self._connect()
