@@ -36,7 +36,7 @@ The main-branch workflow publishes immutable image tags to ghcr.io/kunduruhimane
     docker compose config --quiet
     docker compose up -d
     docker compose ps
-    docker compose logs --tail=100 caddy mlac redis
+    docker compose logs --tail=100 caddy mlac postgres redis
 
 Caddy obtains and renews the TLS certificate after DNS and inbound ports are correct. Confirm the public endpoint:
 
@@ -47,7 +47,7 @@ Caddy obtains and renews the TLS certificate after DNS and inbound ports are cor
 
 ## Operational controls
 
-- PostgreSQL and Redis are the shared state backends for API replicas. Keep their ports private, size PostgreSQL connection limits for the number of API workers, and keep database/Redis volumes on encrypted persistent storage.
+- PostgreSQL and Redis are the shared state backends for API replicas. Keep their ports private, size PostgreSQL connection limits for the number of API replicas multiplied by MLAC_API_DB_POOL_SIZE, and keep database/Redis volumes on encrypted persistent storage.
 - Do not publish Redis or the API port. Restrict SSH and Docker administration to trusted operators.
 - Keep .env, PostgreSQL data, Redis data, Caddy state, and backups out of source control and public artifacts.
 - Configure host-level encrypted disk, unattended security updates, firewall policy, log collection, alerting, and a host restart policy.
