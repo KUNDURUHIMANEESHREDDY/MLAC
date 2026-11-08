@@ -11,7 +11,6 @@ import os
 import time
 from collections import deque
 from dataclasses import asdict
-from sqlite3 import Error as SQLiteError
 from threading import Lock
 from typing import Any
 from urllib.parse import urlparse
