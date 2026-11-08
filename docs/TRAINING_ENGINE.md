@@ -1,0 +1,94 @@
+# Training Engine v1
+
+The Training Engine turns the Weight Engine's distillation objective and LoRA
+adapter into bounded, reproducible PyTorch training runs. It trains a deep
+copy of the supplied model and returns the selected checkpoint and evidence;
+it never mutates the caller's model or promotes/deploys a model.
+
+## Supported data contract
+
+Training data is supplied as three explicit `TensorSplit` objects:
+`train`, `validation`, and `heldout`. Each contains CPU tensors
+`inputs[N,...]`, integer class labels `labels[N]`, and unique
+`sample_ids[N]`. All splits must have matching feature shapes and disjoint
+sample IDs. Each split is capped at 100,000 examples. A dataset revision plus
+the exact tensor bytes, shapes, dtypes, and sample IDs form a SHA-256 dataset
+digest. The engine does not execute dataset code, load arbitrary serialized
+objects, download data, or infer split membership.
+
+Keep held-out data sealed from training and checkpoint selection. The engine
+uses only train batches for gradient updates, validation loss for best
+checkpoint selection/early stopping, then evaluates the selected checkpoint
+once on held-out data. Dataset provenance, consent, licensing, contamination,
+and split correctness remain operator responsibilities.
+
+## Training modes
+
+- `distillation`: a separately supplied teacher is copied, frozen, and run
+  under inference mode. Student logits are optimized with MLAC's
+  temperature-scaled KL plus optional supervised cross-entropy objective.
+  Teacher/student output dimensions must match.
+- `lora`: explicit `LoRATarget(module, rank, alpha, dropout)` values inject
+  LoRA into named `nn.Linear` modules. The copied base model is frozen and
+  only adapter A/B parameters are passed to AdamW. Labels are required.
+
+Both modes currently expect a model returning finite classification logits
+with shape `[batch, classes]` and integer class labels. This is a trusted
+in-process library API: callers must supply reviewed model objects. The
+controller does not execute model or dataset code from an untrusted manifest.
+
+## Reproducibility and bounds
+
+`TrainingConfig` fixes the optimizer to AdamW and bounds epochs (1–100),
+batch size (1–1024), patience (1–20), total update steps, learning rate,
+weight decay, gradient clipping, seed, temperature, and distillation alpha.
+Supported schedulers are none, cosine, and step. CPU tensors and deterministic
+PyTorch algorithms are used. The result records per-epoch training/validation
+loss and learning rate, selected epoch, checkpoint SHA-256, dataset SHA-256,
+trainable/total parameter counts, and held-out loss/accuracy.
+
+Example:
+
+```python
+import torch
+from torch import nn
+from mlac.training_engine import (
+    LoRATarget, TensorSplit, TrainingConfig, TrainingDataset, TrainingEngine,
+)
+
+dataset = TrainingDataset(
+    train=TensorSplit(train_x, train_y, train_ids),
+    validation=TensorSplit(validation_x, validation_y, validation_ids),
+    heldout=TensorSplit(heldout_x, heldout_y, heldout_ids),
+    revision="dataset-v3",
+)
+result = TrainingEngine().fit(
+    model=student,
+    teacher=teacher,                    # required for distillation
+    dataset=dataset,
+    mode="distillation",
+    config=TrainingConfig(epochs=12, seed=41, learning_rate=1e-3),
+)
+print(result.summary())
+trained_student = result.model
+```
+
+For LoRA, call `fit(mode="lora", lora_targets=(LoRATarget("encoder.0", rank=8),))`
+and omit the teacher.
+
+## Candidate evaluation and promotion boundary
+
+Training completion is not promotion. The selected checkpoint and training
+summary are evidence inputs to a separate candidate-evaluation workflow.
+Promotion requires an operator-configured candidate bundle adapter and the
+existing `CandidateEvaluationPipeline`: immutable worker image, signed worker
+report, controller-side input digest verification, held-out quality/performance
+policy, candidate-only governance, artifact registration, and experiment
+ledger. The worker's existing TransformerBlock regression evaluator does not
+natively evaluate arbitrary classification models; do not pass a generic
+training checkpoint to it. A model-family-specific fixed evaluator and
+candidate reconstruction contract must be registered before that family can
+be promoted through the pipeline.
+
+No model is deployed or production-mutated by the Training Engine. External
+approval and recovery controls remain outside the self-modifying system.
