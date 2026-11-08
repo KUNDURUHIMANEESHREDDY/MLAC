@@ -66,7 +66,7 @@ class TrainingDataset:
     def __post_init__(self) -> None:
         if not isinstance(self.revision, str) or not self.revision.strip() or len(self.revision) > 256:
             raise ValueError("dataset revision must be a non-empty identifier of at most 256 characters")
-        if any(split.labels is None for split in (self.train, self.validation, self.heldout)):
+        if any(not isinstance(split, TensorSplit) for split in (self.train, self.validation, self.heldout)):\n            raise TypeError("train, validation, and heldout must be TensorSplit instances")\n        if any(split.labels is None for split in (self.train, self.validation, self.heldout)):
             raise ValueError("all training splits require labels")
         sets = [set(split.sample_ids) for split in (self.train, self.validation, self.heldout)]
         if sets[0] & sets[1] or sets[0] & sets[2] or sets[1] & sets[2]:
@@ -101,6 +101,18 @@ class LoRATarget:
     rank: int = 4
     alpha: float = 8.0
     dropout: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.module, str) or not re.fullmatch(r"[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*", self.module):
+            raise ValueError("LoRA module must be an explicit dotted module path")
+        if isinstance(self.rank, bool) or not isinstance(self.rank, int) or not 1 <= self.rank <= 64:
+            raise ValueError("LoRA rank must be an integer in [1, 64]")
+        if (isinstance(self.alpha, bool) or not isinstance(self.alpha, (int, float))
+                or not math.isfinite(self.alpha) or not 0 < self.alpha <= 256):
+            raise ValueError("LoRA alpha must be finite and in (0, 256]")
+        if (isinstance(self.dropout, bool) or not isinstance(self.dropout, (int, float))
+                or not math.isfinite(self.dropout) or not 0 <= self.dropout < 1):
+            raise ValueError("LoRA dropout must be finite and in [0, 1)")
 
 
 @dataclass(frozen=True)
