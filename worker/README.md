@@ -103,3 +103,19 @@ boundary. Production deployments should use an independently administered
 object-lock/WORM backend, encryption, backup/restore testing, and restricted
 registry write permissions. The registry stores candidate and trusted input
 files as well as the report and attestation; protect it accordingly.
+
+
+## Host-side output collection
+
+The writable /output mount is controlled by the worker process. The controller
+therefore does not use a check-then-read pathname walk. It opens the output root
+once, traverses relative to pinned directory descriptors, opens children with
+O_NOFOLLOW, verifies the opened inode/type, and enforces the aggregate byte
+limit while reading. Symlinks, special files, and entries changed during an
+open race are skipped; a growing file cannot exceed the configured byte limit.
+
+The runner checks for POSIX descriptor-relative openat and O_NOFOLLOW support
+before starting Docker. On hosts without those primitives (including native
+Windows Python), candidate execution fails closed rather than using a
+race-prone pathname fallback. Use a Linux host or VM until native Windows
+reparse-point-safe collection is implemented.
