@@ -28,6 +28,10 @@ parameter migrations with shape checks and transactional semantics.
 
 ## Example
 
+This first example shows a model-family architecture description. Its
+`attention` operation is a semantic label, not one of the compiler's built-in
+operators; compile it only after registering a compatible attention operator.
+
 ```python
 from mlac.ir import (
     Architecture, Component, GraphEdge, GraphNode, ParameterMapping,
@@ -146,13 +150,38 @@ uses `checkpoint_key` (or the canonical name when absent), verifies tensor
 shapes, and copies tensors into the compiled module. Strict loading rejects
 missing and unexpected checkpoint keys.
 
-Example:
+Executable compiler example:
 
 ```python
+from mlac.ir import Architecture, GraphEdge, GraphNode, ParameterMapping, TensorSpec
 from mlac.compiler import compile_architecture
 
-compiled = compile_architecture(architecture)
-output = compiled(input_tensor)
+executable = Architecture(
+    name="tiny-projection",
+    family="mlp",
+    graph_nodes=(
+        GraphNode("input", "input"),
+        GraphNode("projection", "linear", attributes={
+            "in_features": 4,
+            "out_features": 2,
+            "parameter_bindings": {
+                "weight": "projection.weight",
+                "bias": "projection.bias",
+            },
+        }),
+    ),
+    graph_edges=(GraphEdge("input", "projection"),),
+    tensors=(
+        TensorSpec("projection.weight", (2, 4), "fp32"),
+        TensorSpec("projection.bias", (2,), "fp32"),
+    ),
+    parameter_mappings=(
+        ParameterMapping("projection.weight", "projection.weight", shape=(2, 4)),
+        ParameterMapping("projection.bias", "projection.bias", shape=(2,)),
+    ),
+)
+compiled = compile_architecture(executable)
+output = compiled(input_tensor)  # input_tensor shape: [batch, 4]
 report = compiled.load_checkpoint(checkpoint_state_dict, strict=True)
 ```
 
@@ -214,8 +243,9 @@ architecture description.
 
 MLAC-IR v1 does not yet define a universal operator semantics catalogue,
 control-flow/loop semantics, sparse or sharded tensor layouts, quantization
-metadata beyond dtype labels, optimizer/training state, or a framework
-compiler. Adapters must declare unsupported features rather than guessing.
+metadata beyond dtype labels, or optimizer/training state. The PyTorch compiler
+is an optional adapter with a finite built-in operator set; other frameworks
+and operators require explicit adapters. Unsupported features must fail closed.
 Graph validation checks references and rejects cycles for the v1 dataflow
 contract; it does not prove numerical equivalence. Parameter mappings are
 declarations until a checkpoint is loaded and verified against the compiled
