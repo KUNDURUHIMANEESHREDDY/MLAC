@@ -45,7 +45,7 @@ def test_full_ir_round_trip_and_fingerprint_are_stable():
         ),
         initialization=(InitializationStrategy("qkv.weight", "xavier_uniform", {"gain": 1.0}, seed=7),),
         runtime_requirements=RuntimeRequirements(
-            backend="pytorch", required_features=("bf16",), allowed_dtypes=("bf16",),
+            backend="pytorch", required_features=("bf16",), required_dtypes=("bf16",),
             minimum_memory_bytes=1024, maximum_sequence_length=2048,
         ),
         weight_transformations=(
@@ -87,7 +87,7 @@ def test_runtime_compatibility_checks_backend_features_dtype_and_memory():
         runtime_requirements=RuntimeRequirements(
             backend="pytorch",
             required_features=("bf16", "flash_attention"),
-            allowed_dtypes=("bf16",),
+            required_dtypes=("bf16",),
             minimum_memory_bytes=4096,
             maximum_sequence_length=4096,
         ),
