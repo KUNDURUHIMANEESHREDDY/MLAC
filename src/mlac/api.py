@@ -286,6 +286,13 @@ def create_app(
         elif database_path:
             state_store = SQLiteStateStore(database_path)
 
+    if os.getenv("MLAC_REQUIRE_POSTGRES_STATE", "").lower() in {"1", "true", "yes"}:
+        if not isinstance(state_store, PostgresStateStore):
+            raise RuntimeError("Production mode requires PostgreSQL state storage")
+    if os.getenv("MLAC_REQUIRE_SHARED_RATE_LIMITER", "").lower() in {"1", "true", "yes"}:
+        if not os.getenv("MLAC_RATE_LIMIT_REDIS_URL"):
+            raise RuntimeError("Production mode requires shared Redis rate limiting")
+
     model_store = (
         model_registry
         if model_registry is not None
@@ -333,7 +340,7 @@ def create_app(
     app.state.storage_mode = (
         "postgres"
         if isinstance(state_store, PostgresStateStore)
-        else "sqlite" if state_store is not None else "process-local"
+        else "sqlite" if isinstance(state_store, SQLiteStateStore) else "custom" if state_store is not None else "process-local"
     )
 
     def require_principal(credentials=Depends(bearer)) -> str:
@@ -405,7 +412,7 @@ def create_app(
                 raise HTTPException(status_code=503, detail="Shared rate-limit service is unavailable") from exc
         return {
             "status": "ready",
-            "scope": "localhost-development",
+            "scope": "api-runtime",
             "storage": app.state.storage_mode,
         }
 
