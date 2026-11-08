@@ -181,3 +181,20 @@ and enforces the aggregate byte limit while reading. Symlinks, special files,
 and entries changed during an open race are skipped; growing files cannot
 exceed the configured byte limit. The runner fails closed when the host lacks
 the required POSIX openat/O_NOFOLLOW support.
+
+## Automated image build and digest pinning
+
+Every change to the worker image inputs on `main` triggers
+`.github/workflows/build-worker.yml`. The workflow builds the Linux AMD64 image,
+pushes a commit-addressed tag to GitHub Container Registry, and requests BuildKit
+SBOM and provenance attestations. It writes the immutable reference to the
+GitHub Actions run summary in this form:
+
+    ghcr.io/kunduruhimaneeshreddy/mlac-worker@sha256:<build-output-digest>
+
+Copy the exact digest reference from the successful run summary into the
+controller's `image` configuration. The `latest` and `sha-...` tags are
+convenience references only and must not be used by the production pipeline.
+The package must be accessible to the worker host's container runtime. The
+workflow does not grant access to private packages or provision host pull
+credentials automatically.
