@@ -15,6 +15,13 @@ from mlac.artifact_registry import ArtifactRegistry
 from mlac.runtime_identity import RuntimeIdentityVerifier
 
 class SandboxRunner(Protocol):
+    """Execute only the controller-supplied worker command in the isolated runtime.
+
+    When require_runtime_identity is enabled, the returned execution object must
+    include runtime_identity_evidence: an authority-signed envelope that the
+    configured RuntimeIdentityVerifier can validate for this worker and image.
+    """
+
     def run(self, *, candidate_dir: str | Path, command: list[str],
             trusted_dir: str | Path | None = None,
             identity_dir: str | Path | None = None) -> Any: ...
@@ -180,6 +187,8 @@ class CandidateEvaluationPipeline:
             "--identity-key","/identity/worker_ed25519_private.pem",
             "--worker-id",self.worker_id,"--worker-image",self.image])
         if execution.timed_out: raise RuntimeError("Candidate worker exceeded its wall-clock limit")
+        if execution.exit_code != 0:
+            raise RuntimeError(f"Candidate worker failed with exit code {execution.exit_code}: {execution.stderr[:2000]}")
         runtime_identity = None
         if self.require_runtime_identity:
             evidence = getattr(execution, "runtime_identity_evidence", None)
@@ -187,8 +196,6 @@ class CandidateEvaluationPipeline:
                 raise PermissionError("independent runtime identity evidence is required but was not supplied")
             runtime_identity = self.runtime_identity_verifier.verify(
                 evidence, expected_worker_id=self.worker_id, expected_image_digest=self.image)
-        if execution.exit_code != 0:
-            raise RuntimeError(f"Candidate worker failed with exit code {execution.exit_code}: {execution.stderr[:2000]}")
         report_bytes=execution.output_files.get("report.json")
         if not isinstance(report_bytes,bytes): raise RuntimeError("Trusted worker did not produce /output/report.json")
         if len(report_bytes)>self.max_report_bytes: raise RuntimeError("Worker report exceeds configured report size limit")
