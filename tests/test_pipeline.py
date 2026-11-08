@@ -143,3 +143,38 @@ def test_pipeline_rejects_replayed_worker_attestation(tmp_path):
     pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="first")
     with pytest.raises(ValueError,match="already been used"):
         pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="replay")
+
+
+def test_pipeline_fails_closed_when_runtime_identity_is_required(tmp_path):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+    from mlac.runtime_identity import RuntimeIdentityVerifier
+    pipe,runner,candidate,trusted,_=make_pipe(tmp_path)
+    authority=Ed25519PrivateKey.generate()
+    public=authority.public_key().public_bytes(
+        serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo)
+    pipe.runtime_identity_verifier=RuntimeIdentityVerifier(
+        trusted_authorities={"runtime-authority":public},
+        nonce_db=tmp_path/"runtime-nonces.sqlite3",trust_domain="mlac.example")
+    pipe.require_runtime_identity=True
+    with pytest.raises(PermissionError,match="evidence is required"):
+        pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="no-runtime-proof")
+
+
+def test_pipeline_uploads_artifacts_to_remote_store(tmp_path):
+    from types import SimpleNamespace
+    import hashlib
+    class RemoteStore:
+        def __init__(self): self.uploaded=[]
+        def put_bytes(self,data):
+            digest=hashlib.sha256(data).hexdigest()
+            self.uploaded.append(digest)
+            return SimpleNamespace(bucket="worm",key="sha256/"+digest,version_id="v1",
+                sha256=digest,retention_until="2030-01-01T00:00:00+00:00",object_lock_mode="COMPLIANCE")
+    pipe,runner,candidate,trusted,_=make_pipe(tmp_path)
+    remote=RemoteStore()
+    pipe.remote_artifact_store=remote
+    result=pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="remote")
+    assert remote.uploaded
+    assert all("remote" in item for item in result.artifacts)
+    assert all(item["remote"]["object_lock_mode"]=="COMPLIANCE" for item in result.artifacts)
