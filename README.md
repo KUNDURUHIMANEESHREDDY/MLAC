@@ -55,10 +55,11 @@ Build the initial worker image from the repository root:
 
     docker build -f worker/Dockerfile -t mlac-worker:local .
 
-Resolve its immutable image digest and configure that digest in DockerSandboxRunner and CandidateEvaluationPipeline. The candidate directory contains candidate.pt and candidate_manifest.json. A separate operator-managed trusted evaluation directory contains manifest.json, baseline.pt, input.pt, and target.pt. See worker/README.md for the manifest format.
+Resolve its immutable image digest and configure that digest in DockerSandboxRunner and CandidateEvaluationPipeline. The candidate directory contains candidate.pt and candidate_manifest.json. A separate operator-managed trusted evaluation directory contains manifest.json, baseline.pt, input.pt, target.pt, and dataset-manifest.json. The signed dataset manifest must cover the input_tensor and target_tensor files referenced by manifest.json. See worker/README.md and docs/DATASET_MANIFESTS.md.
 
     from mlac.pipeline import CandidateEvaluationPipeline
     from mlac.sandbox import DockerSandboxRunner
+    import json
     from pathlib import Path
     from mlac.experiments import ExperimentStore
     from mlac.artifact_registry import ArtifactRegistry
@@ -74,7 +75,7 @@ Resolve its immutable image digest and configure that digest in DockerSandboxRun
     trusted_evaluation_dir = Path("./operator-controlled-evaluation")
     dataset_manifest = create_signed_dataset_manifest(
         trusted_evaluation_dir, dataset_id="heldout-eval", revision="v1",
-        splits={"test": ["evaluation.jsonl"]}, signer_id="dataset-release-prod",
+        splits={"test": ["input.pt", "target.pt"]}, signer_id="dataset-release-prod",
         private_key_pem=dataset_signing_key,
     )
     (trusted_evaluation_dir / "dataset-manifest.json").write_text(
@@ -86,9 +87,6 @@ Resolve its immutable image digest and configure that digest in DockerSandboxRun
         image=image,
         store=ExperimentStore("mlac-experiments.sqlite3"),
         trusted_worker_keys={key_id: trusted_public_key},
-        trusted_dataset_signers={
-            "dataset-release-prod": Path("/etc/mlac/trust/dataset-release-prod.pem").read_bytes(),
-        },
         worker_identity_dir=worker_identity_dir,
         trusted_dataset_signers={"dataset-release-prod": dataset_public_key},
         artifact_registry=ArtifactRegistry("./mlac-artifacts"),
