@@ -20,10 +20,10 @@ The controller mounts two different host directories:
 Never place the trusted evaluation directory under candidate-controlled storage.
 The pipeline requires both directories separately and DockerSandboxRunner rejects
 using the same directory for both mounts. The candidate cannot replace the baseline, input, target, trusted architecture,
-or worker command. candidate_manifest.json declares one allow-listed structural
+or worker command. candidate_manifest.json declares one allow-listed structural or weight
 operation and bounded parameters; the fixed worker independently validates it,
-reconstructs the candidate architecture from the trusted baseline, and strictly
-loads candidate.pt into that reconstructed structure.
+reconstructs the candidate from the trusted baseline, and strictly loads
+candidate.pt into that reconstructed structure.
 
 Example trusted manifest:
 
@@ -45,6 +45,33 @@ Example trusted manifest:
 This worker computes negative mean-squared error; higher (less negative) is
 better. It remains useful for the small regression fixture, not as a general
 LLM quality measure.
+
+## Weight optimization candidates
+
+The same `/opt/mlac-worker/evaluate` entrypoint independently reconstructs
+weight candidates declared by `candidate_manifest.json`:
+
+- `prune_unstructured`: magnitude pruning of one allow-listed parameter.
+- `prune_structured`: zero-mask selected input columns or output rows of an
+  allow-listed Linear weight (output-row pruning also masks its bias).
+- `fake_quantize_int8`: symmetric per-tensor INT8 quantize/dequantize
+  simulation; the checkpoint remains floating point.
+- `inject_lora`: inject a low-rank adapter into an allow-listed Linear module.
+
+Parameter targets are restricted to the fixed `TransformerBlock` state paths
+under `attention.qkv`, `attention.out_proj`, `mlp.0`, and `mlp.2`.
+LoRA module targets are restricted to those four Linear modules. The worker
+does not accept arbitrary module names, dynamic code, or candidate-defined
+architecture settings. It rebuilds the operation from the trusted baseline
+before strict-loading the candidate checkpoint.
+
+The worker's existing signed report and evaluation gates are unchanged.
+Structured/unstructured masks do not physically shrink tensors; fake
+quantization does not pack INT8 values or invoke an INT8 kernel; and LoRA
+injection is not adapter training. Use held-out task evaluation before
+considering any candidate. Distillation is not yet an executable worker
+operation; it remains a loss primitive pending a separately governed
+Training Engine workflow.
 
 ## Causal-LM perplexity and reasoning evaluator (new)
 
