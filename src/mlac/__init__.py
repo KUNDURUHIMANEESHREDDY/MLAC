@@ -1,5 +1,5 @@
 """Master LLM Architecture Controller."""
-__version__ = "0.9.0"
+__version__ = "1.0.0"
 from mlac.ir import (
     IR_SCHEMA_VERSION, Architecture, CompatibilityConstraint, Component, GraphEdge as IRGraphEdge,
     GraphNode as IRGraphNode, InitializationStrategy, ParameterMapping,
