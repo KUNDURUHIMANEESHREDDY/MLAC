@@ -13,4 +13,5 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev,torch,api]"
+      - run: python -m ruff check src/mlac/api.py src/mlac/cli.py tests/test_api.py
       - run: pytest
