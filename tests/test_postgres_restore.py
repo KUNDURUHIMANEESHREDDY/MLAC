@@ -166,8 +166,19 @@ def test_postgres_backup_restores_into_empty_disposable_database(
     restore_command = restore_commands[0]
     assert "--dbname" in restore_command
     assert restore_command[restore_command.index("--dbname") + 1] == target.database
-    connection_args = restore_command[1:-1]
-    assert target.password not in " ".join(connection_args)
+    fixed_flags = {
+        "--exit-on-error",
+        "--no-owner",
+        "--no-acl",
+        "--single-transaction",
+        "--no-password",
+        "--dbname",
+    }
+    connection_args = [arg for arg in restore_command[1:-1] if arg not in fixed_flags]
+    # The target database is the only non-flag argument before the archive path.
+    # Credentials must remain in the sanitized PG* environment, never argv.
+    assert connection_args == [target.database]
+    assert target.password not in connection_args
     assert result["format"] == "postgres-custom"
     assert result["sha256"] == digest
     assert result["database"] == target_name
