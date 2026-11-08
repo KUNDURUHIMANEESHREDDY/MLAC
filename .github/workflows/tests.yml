@@ -63,8 +63,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y postgresql-client-16
           echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
-          /usr/lib/postgresql/16/bin/pg_dump --version | grep -Eq 'PostgreSQL\\) 16\\.'
-          /usr/lib/postgresql/16/bin/pg_restore --version | grep -Eq 'PostgreSQL\\) 16\\.'
+          /usr/lib/postgresql/16/bin/pg_dump --version | grep -Eq 'PostgreSQL[)] 16[.]'
+          /usr/lib/postgresql/16/bin/pg_restore --version | grep -Eq 'PostgreSQL[)] 16[.]'
       - run: pip install -e ".[dev,torch,api,production]"
       - run: python -m ruff check src/mlac/api.py src/mlac/cli.py src/mlac/training_engine.py src/mlac/pipeline.py src/mlac/dataset_manifest.py src/mlac/self_evolution.py src/mlac/evolution.py src/mlac/registry.py src/mlac/sqlite_state.py src/mlac/rate_limit.py src/mlac/postgres_state.py scripts/backup_state.py scripts/restore_postgres_backup.py scripts/migrate_sqlite_to_postgres.py tests/test_api.py tests/test_rate_limit.py tests/test_state_store.py tests/test_postgres_state.py tests/test_postgres_restore.py
       - run: pytest
