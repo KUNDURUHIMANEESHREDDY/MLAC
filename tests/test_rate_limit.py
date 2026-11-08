@@ -78,3 +78,31 @@ def test_redis_limiter_rejects_invalid_configuration_and_responses():
     )
     with pytest.raises(RateLimiterUnavailable):
         limiter.check("peer")
+
+
+def test_two_redis_limiter_instances_share_the_same_budget():
+    """Verify rate limits are shared across independent application instances."""
+    import hashlib
+    import os
+    from uuid import uuid4
+
+    from redis import Redis
+
+    url = os.getenv("MLAC_TEST_REDIS_URL")
+    if not url:
+        pytest.skip("MLAC_TEST_REDIS_URL is not configured")
+    namespace = f"integration-{uuid4().hex}"
+    first = RedisRateLimiter.from_url(
+        url, namespace=namespace, limit=2, window_seconds=60
+    )
+    second = RedisRateLimiter.from_url(
+        url, namespace=namespace, limit=2, window_seconds=60
+    )
+    first.check("shared-principal")
+    second.check("shared-principal")
+    with pytest.raises(RuntimeError):
+        first.check("shared-principal")
+    first.health_check()
+    Redis.from_url(url).delete(
+        f"mlac:rate:{namespace}:" + hashlib.sha256(b"shared-principal").hexdigest()
+    )
