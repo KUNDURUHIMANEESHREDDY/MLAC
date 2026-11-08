@@ -8,6 +8,7 @@ MLAC now has an application-level safety kernel in `mlac.safety`.
 - Integrity checks detect mutation of the baseline or effective policy object.
 - Policy changes are monotonic: permissions can be disabled, budgets reduced, and candidate limits lowered; controls cannot be relaxed through the `tighten()` API.
 - Candidate mutations are checked against the candidate permission and parameter-growth budget.
+- The existing `GovernancePolicy.authorize()` path now delegates candidate and production authorization to the safety kernel; production additionally requires a passing evaluation, an externally pinned production-policy digest, and a signed approval.
 - Production mutations are denied by default.
 - If production mutations are explicitly enabled by a trusted deployment configuration, each operation additionally requires an unexpired HMAC-SHA256 approval scoped to the exact model and operation.
 - The approval signing key is supplied only to the verifier; the signing function is intended for a separate operator service.
@@ -24,7 +25,7 @@ kernel.authorize_candidate(operation="prune-attention-head", parameter_growth_ra
 # kernel.authorize_production(...) raises PermissionError.
 ```
 
-An external operator service may issue an `OperatorApproval` by signing its canonical payload with HMAC-SHA256. Production policy must be enabled out-of-band, and the verifier must receive the verification key from a secret manager. Never expose signing keys through the MLAC API or store them in the repository.
+An external operator service may issue an `OperatorApproval` by signing its canonical payload with HMAC-SHA256. Production policy must be enabled out-of-band by setting `allow_production_mutations=True` and pinning the digest returned by `guardrail_policy_digest(policy)` in a separately controlled deployment manifest. `GovernancePolicy` passes that digest into the kernel. The verifier must receive the verification key from a secret manager. Never expose signing keys through the MLAC API or store them in the repository.
 
 ## Critical security limitations
 
