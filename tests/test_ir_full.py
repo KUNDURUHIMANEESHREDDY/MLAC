@@ -128,3 +128,27 @@ def test_invalid_schema_and_invalid_tensor_shapes_are_rejected():
         Architecture(name="x", family="mlp", schema_version=99)
     with pytest.raises(ValueError, match="non-negative"):
         TensorSpec("bad", (4, -1))
+
+
+
+def test_public_package_exposes_ir_graph_types_and_lazy_adapters():
+    from mlac import IRGraphEdge, IRGraphNode, apply_weight_transformations, compile_architecture
+
+    assert IRGraphNode("input", "input").operation == "input"
+    assert IRGraphEdge("input", "output").source == "input"
+    assert callable(compile_architecture)
+    assert callable(apply_weight_transformations)
+
+
+def test_ir_rejects_cycles_and_invalid_runtime_capabilities():
+    import pytest
+
+    cyclic = Architecture(
+        name="cyclic",
+        family="graph",
+        graph_nodes=(GraphNode("a", "input"), GraphNode("b", "identity")),
+        graph_edges=(GraphEdge("a", "b"), GraphEdge("b", "a")),
+    )
+    assert any("graph contains a cycle" in error for error in cyclic.validate())
+    with pytest.raises(ValueError, match="runtime backend"):
+        RuntimeCapabilities(backend="")
