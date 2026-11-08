@@ -15,11 +15,13 @@ logits shape with the final class/vocabulary dimension removed. All splits
 must have matching feature shapes and disjoint
 sample IDs. Each split is capped at 100,000 examples. A dataset revision plus
 the exact tensor bytes, shapes, dtypes, and sample IDs form a SHA-256 dataset
-digest. Optionally, attach a `SignedDatasetBinding` containing an Ed25519
-manifest envelope, its dataset root, and operator-trusted public signer keys.
-The engine verifies file hashes, signer trust, revision, and train/validation/
-heldout-or-test split declarations before training, then records the source
-manifest digest and signer ID in training evidence. The engine does not execute
+digest. A `SignedDatasetBinding` is mandatory and contains an Ed25519 manifest
+ envelope, its dataset root, and operator-trusted public signer keys. The
+ manifest must include the exact materialized tensor fingerprint
+ (`TrainingDataset.digest`) and train/validation/heldout-or-test source files.
+ The engine verifies file hashes, signer trust, revision, split declarations,
+ and the tensor fingerprint before training, then records the source manifest
+ digest and signer ID in training evidence. The engine does not execute
 dataset code, load arbitrary serialized objects, download data, or infer split
 membership.
 
