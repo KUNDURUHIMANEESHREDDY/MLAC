@@ -84,3 +84,11 @@ def test_cast_transformation_enforces_target_dtype_contract():
     result = apply_weight_transformations(architecture, {"source.weight": source})
     assert result.parameters["target.weight"].dtype == torch.bfloat16
     assert torch.equal(result.parameters["target.weight"].float(), source)
+
+
+
+def test_non_strict_mode_reports_skipped_transformations():
+    result = apply_weight_transformations(_split_architecture(), {}, strict=False)
+    assert result.records == ()
+    assert len(result.skipped) == 1
+    assert "fused.qkv" in result.skipped[0]
