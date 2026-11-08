@@ -7,6 +7,7 @@ from mlac.ir import (
     WeightTransformationRequirement, validate_compatibility,
 )
 from mlac.registry import ModelRegistry, ModelRecord
+from mlac.designer import ArchitectureDesigner, DesignCandidate, DesignConstraints
 from mlac.master_intelligence import MasterIntelligenceEngine, IntelligenceReport, OptimizationObjective
 from mlac.openai_backend import OpenAIResponsesBackend, OpenAIProviderError
 from mlac.intelligence_workflow import IntelligenceExperimentWorkflow, IntelligenceWorkflowResult, TorchTransformerCandidateBuilder
@@ -28,6 +29,7 @@ def apply_weight_transformations(*args, **kwargs):
 
 
 __all__ = [
+    "ArchitectureDesigner", "DesignCandidate", "DesignConstraints",
     "IR_SCHEMA_VERSION", "Architecture", "Component", "TensorSpec", "IRGraphNode", "IRGraphEdge",
     "GraphNode", "GraphEdge", "compile_architecture", "apply_weight_transformations",
     "ParameterMapping", "InitializationStrategy", "CompatibilityConstraint",
