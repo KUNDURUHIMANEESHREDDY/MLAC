@@ -63,3 +63,5 @@ def test_postgres_state_persists_and_scopes_models_and_proposals():
 
     reopened_registry.remove(alice.model_id)
     reopened_registry.remove(bob.model_id)
+    store.close()
+    reopened.close()
