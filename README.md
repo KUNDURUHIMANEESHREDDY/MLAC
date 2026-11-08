@@ -2,7 +2,7 @@
 
 MLAC is an open-source research and engineering platform for inspecting machine-learning models, representing structure in a framework-neutral intermediate representation (MLAC-IR), and running governed architecture experiments.
 
-> **Status: Phase 6 engineering preview.** MLAC includes a supported PyTorch transformer target, candidate evaluation and scorecards, a safety kernel, a Docker-backed execution boundary, and a controller-owned sandbox/evaluation/governance workflow. It does not autonomously deploy models.
+> **Status: Phase 7 engineering preview.** MLAC includes a supported PyTorch transformer target, candidate evaluation and scorecards, a safety kernel, a Docker-backed execution boundary, and a controller-owned sandbox/evaluation/governance workflow. It does not autonomously deploy models.
 
 ## Implemented
 
@@ -15,7 +15,9 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 - SQLite-backed append-only experiment scorecard ledger.
 - Safety kernel with policy integrity checks, monotonic tightening, and externally signed production approvals.
 - Docker-backed candidate runner with no network, read-only candidate input, separate trusted evaluation mount, isolated output, dropped capabilities, non-root identity, and resource/time limits.
-- Controller-owned candidate pipeline: fixed trusted worker, validated report, evaluation gates, candidate-only governance, and persisted outcome.
+- Controller-owned candidate pipeline: fixed trusted worker, signed evidence verification, evaluation gates, candidate-only governance, and persisted outcome.
+- Ed25519 worker-result attestations bound to report and input-artifact SHA-256 digests, with durable nonce replay rejection.
+- Content-addressed artifact registry with SHA-256 verification and SQLite evaluation associations.
 
 ## Quick start
 
@@ -37,13 +39,21 @@ Resolve its immutable image digest and configure that digest in DockerSandboxRun
 
     from mlac.pipeline import CandidateEvaluationPipeline
     from mlac.sandbox import DockerSandboxRunner
+    from pathlib import Path
     from mlac.experiments import ExperimentStore
+    from mlac.artifact_registry import ArtifactRegistry
 
     image = "registry.example/mlac-worker@sha256:<64-hex-digest>"
+    worker_identity_dir = Path("./worker-identity")
+    trusted_public_key = Path("./trusted-workers/worker-ed25519-public.pem").read_bytes()
+    key_id = "<public-key-sha256-fingerprint>"
     pipeline = CandidateEvaluationPipeline(
         runner=DockerSandboxRunner(image=image),
         image=image,
         store=ExperimentStore("mlac-experiments.sqlite3"),
+        trusted_worker_keys={key_id: trusted_public_key},
+        worker_identity_dir=worker_identity_dir,
+        artifact_registry=ArtifactRegistry("./mlac-artifacts"),
     )
     result = pipeline.run(
         candidate_dir="./candidate-bundle",
@@ -53,7 +63,9 @@ Resolve its immutable image digest and configure that digest in DockerSandboxRun
     )
     print(result.status, result.evaluation.evaluation_id)
 
-The pipeline can authorize only a candidate operation. It does not deploy or promote to production. The initial worker does not execute generated Python source; that requires a separately reviewed harness. See worker/README.md, docs/PHASE5.md, and docs/PHASE6.md.
+The worker identity directory contains worker_ed25519_private.pem and is mounted read-only at /identity. Protect the private key so only the worker UID (65532 in the container) can read it; do not commit it or bake it into the image. Register the corresponding public key in controller trust configuration. The worker signs the canonical report and hashes of every direct input artifact. The controller verifies the signature, worker key, configured image digest, report hash, and independently re-hashed inputs before evaluation. The SQLite artifact registry stores immutable SHA-256-addressed blobs and links them to the evaluation; a persistent nonce table rejects replayed attestations. See docs/PHASE7.md for key provisioning and operational limits.
+
+The pipeline can authorize only a candidate operation. It does not deploy or promote to production. The initial worker does not execute generated Python source; that requires a separately reviewed harness. See worker/README.md, docs/PHASE5.md, docs/PHASE6.md, and docs/PHASE7.md.
 
 ## Safety and limitations
 
@@ -65,12 +77,12 @@ The pipeline can authorize only a candidate operation. It does not deploy or pro
 - The optional API is unauthenticated; keep it on localhost.
 - Trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
 
-See docs/ARCHITECTURE.md, docs/PHASE4.md, docs/PHASE5.md, and docs/PHASE6.md.
+See docs/ARCHITECTURE.md and docs/PHASE4.md through docs/PHASE7.md.
 
 ## Roadmap
 
-1. Durable artifact store and immutable dataset manifests.
-2. Signed worker attestations and external worker orchestration.
+1. Remote WORM/object-lock artifact backend, encrypted replication, and signed dataset manifests.
+2. External worker orchestration and independently measured runtime identity.
 3. More supported architecture transformations and reproducible task evaluation.
 4. Provider-independent master intelligence and experiment planning.
 5. Recursive controller evaluation with immutable recovery and authorization boundaries.

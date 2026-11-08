@@ -1,6 +1,6 @@
 """Controller-owned sandbox -> evaluation -> governance -> ledger workflow."""
 from __future__ import annotations
-import json, math
+import json, math, re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,10 +10,13 @@ from mlac.benchmark import BenchmarkResult
 from mlac.evaluation import EvaluationPolicy, EvaluationResult
 from mlac.experiments import ExperimentStore
 from mlac.governance import GovernancePolicy
+from mlac.attestation import canonical_json, directory_digests, verify_worker_result
+from mlac.artifact_registry import ArtifactRegistry
 
 class SandboxRunner(Protocol):
     def run(self, *, candidate_dir: str | Path, command: list[str],
-            trusted_dir: str | Path | None = None) -> Any: ...
+            trusted_dir: str | Path | None = None,
+            identity_dir: str | Path | None = None) -> Any: ...
 
 @dataclass(frozen=True)
 class PipelineResult:
@@ -27,6 +30,8 @@ class PipelineResult:
     sandbox_timed_out: bool
     sandbox_image: str
     ledger_record: dict[str, Any] | None = None
+    attestation: dict[str, Any] | None = None
+    artifacts: tuple[dict[str, Any], ...] = ()
 
     @property
     def status(self) -> str:
@@ -45,6 +50,8 @@ class PipelineResult:
             "governance": {"authorized": self.governance_authorized, "reason": self.governance_reason},
             "sandbox": {"exit_code": self.sandbox_exit_code, "timed_out": self.sandbox_timed_out,
                         "image": self.sandbox_image},
+            "attestation": self.attestation,
+            "artifacts": list(self.artifacts),
         }
 
 def _benchmark(value: Any, label: str) -> BenchmarkResult:
@@ -116,12 +123,28 @@ def evaluate_worker_report(report: dict[str,Any], *, policy: EvaluationPolicy|No
 class CandidateEvaluationPipeline:
     """Fixed worker -> strict report validation -> controller gates -> candidate governance -> ledger."""
     def __init__(self, *, runner: SandboxRunner, image: str, store: ExperimentStore,
+                 trusted_worker_keys: dict[str, bytes | str], worker_identity_dir: str | Path,
+                 worker_id: str = "mlac-evaluator", artifact_registry: ArtifactRegistry | None = None,
                  governance: GovernancePolicy|None=None, evaluation_policy: EvaluationPolicy|None=None,
                  worker_entrypoint: str="/opt/mlac-worker/evaluate", max_report_bytes: int=1024*1024):
+        if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image):
+            raise ValueError("pipeline image must be pinned by an immutable sha256 digest")
+        if getattr(runner, "image", image) != image:
+            raise ValueError("pipeline image must match the sandbox runner image")
         if not worker_entrypoint.startswith("/") or "\x00" in worker_entrypoint:
             raise ValueError("worker_entrypoint must be an absolute trusted image path")
         if max_report_bytes < 1: raise ValueError("max_report_bytes must be positive")
+        if not trusted_worker_keys: raise ValueError("at least one trusted worker public key is required")
+        if not isinstance(worker_id, str) or not worker_id.strip(): raise ValueError("worker_id must be non-empty")
         self.runner,self.image,self.store=runner,image,store
+        self.trusted_worker_keys=dict(trusted_worker_keys)
+        self.worker_identity_dir=Path(worker_identity_dir).expanduser().resolve(strict=True)
+        if not self.worker_identity_dir.is_dir(): raise ValueError("worker_identity_dir must be an existing directory")
+        private_key=self.worker_identity_dir / "worker_ed25519_private.pem"
+        if not private_key.is_file() or private_key.is_symlink():
+            raise ValueError("worker_identity_dir must contain a regular worker_ed25519_private.pem")
+        self.worker_id=worker_id
+        self.artifact_registry=artifact_registry or ArtifactRegistry()
         self.governance=governance or GovernancePolicy()
         self.evaluation_policy=evaluation_policy or EvaluationPolicy()
         self.worker_entrypoint,self.max_report_bytes=worker_entrypoint,max_report_bytes
@@ -131,18 +154,42 @@ class CandidateEvaluationPipeline:
             operation: str="register-evaluated-candidate") -> PipelineResult:
         if not model_id.strip() or not candidate_id.strip() or not operation.strip():
             raise ValueError("model_id, candidate_id and operation must be non-empty")
-        execution=self.runner.run(candidate_dir=candidate_dir,trusted_dir=trusted_evaluation_dir,command=[
+        candidate_path=Path(candidate_dir).expanduser().resolve(strict=True)
+        trusted_path=Path(trusted_evaluation_dir).expanduser().resolve(strict=True)
+        identity_path=self.worker_identity_dir.resolve(strict=True)
+        mounts=(candidate_path,trusted_path,identity_path)
+        for index,left in enumerate(mounts):
+            for right in mounts[index+1:]:
+                if left==right or left in right.parents or right in left.parents:
+                    raise ValueError("candidate, trusted evaluation, and worker identity directories must be distinct and non-overlapping")
+        before_digests = directory_digests(candidate_path, trusted_path)
+        execution=self.runner.run(candidate_dir=candidate_path,trusted_dir=trusted_path,
+            identity_dir=identity_path,command=[
             self.worker_entrypoint,"--candidate","/workspace/candidate.pt",
-            "--trusted","/trusted","--report","/output/report.json"])
+            "--trusted","/trusted","--report","/output/report.json",
+            "--identity-key","/identity/worker_ed25519_private.pem",
+            "--worker-id",self.worker_id,"--worker-image",self.image])
         if execution.timed_out: raise RuntimeError("Candidate worker exceeded its wall-clock limit")
         if execution.exit_code != 0:
             raise RuntimeError(f"Candidate worker failed with exit code {execution.exit_code}: {execution.stderr[:2000]}")
         report_bytes=execution.output_files.get("report.json")
         if not isinstance(report_bytes,bytes): raise RuntimeError("Trusted worker did not produce /output/report.json")
         if len(report_bytes)>self.max_report_bytes: raise RuntimeError("Worker report exceeds configured report size limit")
-        try: report=json.loads(report_bytes.decode("utf-8"))
+        try: envelope=json.loads(report_bytes.decode("utf-8"))
         except (UnicodeDecodeError,json.JSONDecodeError) as exc: raise ValueError("Worker report is not valid UTF-8 JSON") from exc
+        if not isinstance(envelope,dict) or set(envelope)!={"schema_version","report","attestation"} or isinstance(envelope.get("schema_version"),bool) or envelope.get("schema_version")!=1:
+            raise ValueError("worker result envelope schema is invalid")
+        report=envelope["report"]
+        report_bytes_canonical=canonical_json(report)
+        after_digests=directory_digests(candidate_path,trusted_path)
+        if before_digests != after_digests:
+            raise ValueError("candidate or trusted evaluation inputs changed during worker execution")
+        verified=verify_worker_result(attestation=envelope["attestation"],report_bytes=report_bytes_canonical,
+            artifact_sha256=after_digests,trusted_worker_keys=self.trusted_worker_keys,expected_image=self.image,
+            expected_worker_id=self.worker_id)
         evaluation=evaluate_worker_report(report,policy=self.evaluation_policy)
+        self.artifact_registry.record_attestation(nonce=verified["nonce"],key_id=verified["key_id"],
+            report_sha256=verified["report_sha256"],evaluation_id=evaluation.evaluation_id)
         authorized=False
         reason="Evaluation did not pass; candidate authorization was not requested"
         if evaluation.promotion_eligible:
@@ -154,5 +201,15 @@ class CandidateEvaluationPipeline:
             except (PermissionError,ValueError) as exc: reason=str(exc)
         result=PipelineResult(evaluation,model_id,candidate_id,operation,authorized,reason,
             execution.exit_code,execution.timed_out,self.image)
+        artifact_bytes={"worker-report.json":report_bytes,
+            "worker-report-payload.json":report_bytes_canonical,
+            "worker-attestation.json":canonical_json(envelope["attestation"])}
+        for role, directory in (("candidate",candidate_path),("trusted",trusted_path)):
+            for path in sorted(directory.iterdir(),key=lambda item:item.name):
+                artifact_bytes[f"{role}/{path.name}"]=path.read_bytes()
+        linked=self.artifact_registry.link_evaluation(evaluation_id=evaluation.evaluation_id,
+            model_id=model_id,candidate_id=candidate_id,artifacts=artifact_bytes)
+        result=replace(result,attestation=verified,artifacts=tuple(
+            {k:v for k,v in item.items() if k!="object_path"} for item in linked))
         ledger=self.store.record(result,model_id=model_id,candidate_id=candidate_id)
         return replace(result,ledger_record=ledger)

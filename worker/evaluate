@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 import torch
 from mlac.transformer import TransformerBlock
+from mlac.attestation import canonical_json, directory_digests, sign_worker_result
 
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -62,8 +63,11 @@ def main() -> int:
     parser.add_argument("--candidate",required=True)
     parser.add_argument("--trusted",required=True)
     parser.add_argument("--report",required=True)
+    parser.add_argument("--identity-key",required=True)
+    parser.add_argument("--worker-id",required=True)
+    parser.add_argument("--worker-image",required=True)
     args=parser.parse_args()
-    if args.candidate != "/workspace/candidate.pt" or args.trusted != "/trusted" or args.report != "/output/report.json":
+    if args.candidate != "/workspace/candidate.pt" or args.trusted != "/trusted" or args.report != "/output/report.json" or args.identity_key != "/identity/worker_ed25519_private.pem":
         raise ValueError("worker paths must match the fixed mount contract")
     candidate_path=artifact(Path("/workspace"),"candidate.pt")
     trusted=Path("/trusted").resolve(strict=True)
@@ -105,8 +109,13 @@ def main() -> int:
         raise ValueError("task quality calculation produced non-finite MSE")
     payload={"schema_version":1,"baseline":baseline_metrics,"candidate":candidate_metrics,
         "quality_baseline":{"score":-float(base_mse)},"quality_candidate":{"score":-float(candidate_mse)}}
+    report_bytes=canonical_json(payload)
+    attestation=sign_worker_result(report_bytes=report_bytes,
+        artifact_sha256=directory_digests("/workspace","/trusted"),
+        private_key_path=args.identity_key,worker_id=args.worker_id,worker_image=args.worker_image)
+    envelope={"schema_version":1,"report":payload,"attestation":attestation}
     temporary=Path("/output/report.json.tmp")
-    temporary.write_text(json.dumps(payload,allow_nan=False,separators=(",",":")),encoding="utf-8")
+    temporary.write_bytes(canonical_json(envelope))
     temporary.replace(Path("/output/report.json"))
     return 0
 

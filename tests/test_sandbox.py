@@ -72,3 +72,17 @@ def test_candidate_and_trusted_inputs_cannot_nest(tmp_path):
     runner = DockerSandboxRunner(image=DIGEST_IMAGE)
     with pytest.raises(ValueError, match="non-overlapping"):
         runner.run(candidate_dir=candidate, trusted_dir=trusted, command=["/worker"])
+
+def test_identity_mount_must_be_distinct_and_existing(tmp_path):
+    import pytest
+    runner = DockerSandboxRunner(image=DIGEST_IMAGE)
+    candidate = tmp_path / "candidate"
+    trusted = tmp_path / "trusted"
+    identity = tmp_path / "identity"
+    candidate.mkdir(); trusted.mkdir(); identity.mkdir()
+    with pytest.raises(ValueError, match="distinct and non-overlapping"):
+        runner.run(candidate_dir=candidate, trusted_dir=trusted,
+                   identity_dir=candidate, command=["/worker"])
+    with pytest.raises(ValueError, match="identity_dir must be an existing directory"):
+        runner.run(candidate_dir=candidate, trusted_dir=trusted,
+                   identity_dir=tmp_path / "missing", command=["/worker"])

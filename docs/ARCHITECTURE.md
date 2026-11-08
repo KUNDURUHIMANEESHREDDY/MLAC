@@ -8,11 +8,13 @@ MLAC separates model metadata, supported transformations, evaluation evidence, e
 - **Mutation:** explicit dropout-configuration update on an IR snapshot, not a live graph or weight rewrite.
 - **Architecture engineering:** MLAC's own PyTorch TransformerBlock supports head pruning with retained-weight migration.
 - **Benchmark and evaluation:** baseline/candidate measurements, finite-output and shape checks, latency/parameter budgets, and mandatory task-quality gates.
-- **Experiment ledger:** SQLite stores immutable evaluation scorecards and workflow outcomes, not model weights or executable checkpoints.
+- **Experiment ledger:** SQLite stores immutable evaluation scorecards and workflow outcomes.
+- **Artifact registry:** content-addressed SHA-256 blobs with SQLite evaluation associations, integrity checks, and one-time worker-attestation nonce records.
+- **Worker identity:** Ed25519 result signatures bind canonical report bytes, configured worker identity/image claim, and controller-recomputed input artifact hashes. Public keys are pinned in controller trust configuration; private keys are mounted read-only only into the fixed worker.
 - **Evolution:** records hypotheses as proposals; it does not independently execute generated code or promote deployments.
 - **Safety kernel:** integrity-checks trusted guardrails, permits only monotonic tightening, and requires externally pinned policy digests and scoped operator approval for production authorization.
 - **Sandbox runner:** digest-pinned Docker execution with read-only candidate input, separate output, disabled network, dropped capabilities, non-root identity, and resource/time controls.
-- **Candidate pipeline:** connects the fixed worker entrypoint to strict report validation, controller-owned evaluation gates, candidate-only governance, and durable scorecard recording. Candidate code cannot choose the worker command or access controller trust roots.
+- **Candidate pipeline:** connects the fixed worker entrypoint to signature and input-digest verification, strict report validation, controller-owned evaluation gates, candidate-only governance, and durable artifact/scorecard recording. Candidate code cannot choose the worker command or access controller trust roots.
 
 Keep the unauthenticated development API on localhost. Before network exposure, add authentication, authorization, durable registry state, rate limits, artifact isolation, and independently enforced sandboxing.
 

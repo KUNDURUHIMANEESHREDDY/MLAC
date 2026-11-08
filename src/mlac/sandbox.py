@@ -58,8 +58,9 @@ class DockerSandboxRunner:
     """Run a candidate command in a separately configured Docker container.
 
     Candidate input is mounted read-only at /workspace. A distinct ephemeral
-    /output directory is writable. No host environment is inherited. Only
-    explicitly supplied environment values are passed; never pass secrets.
+    /output directory is writable. Candidate, trusted, and worker-identity
+    mounts are distinct; the worker identity mount is read-only. No secrets are
+    passed through environment variables.
     """
 
     def __init__(
@@ -88,6 +89,7 @@ class DockerSandboxRunner:
         candidate_dir: str | os.PathLike[str],
         command: Sequence[str],
         trusted_dir: str | os.PathLike[str] | None = None,
+        identity_dir: str | os.PathLike[str] | None = None,
     ) -> SandboxResult:
         """Execute argv in Docker; candidate and trusted evaluation inputs are separate read-only mounts."""
         try:
@@ -105,6 +107,19 @@ class DockerSandboxRunner:
             if not trusted.is_dir():
                 raise ValueError("trusted_dir must be an existing directory")
             if trusted == source or trusted in source.parents or source in trusted.parents:
+                raise ValueError("candidate_dir and trusted_dir must be distinct and non-overlapping")
+        identity = None
+        if identity_dir is not None:
+            try:
+                identity = Path(identity_dir).expanduser().resolve(strict=True)
+            except FileNotFoundError as exc:
+                raise ValueError("identity_dir must be an existing directory") from exc
+            if not identity.is_dir():
+                raise ValueError("identity_dir must be an existing directory")
+            for other in (source, trusted):
+                if other is not None and (identity == other or identity in other.parents or other in identity.parents):
+                    raise ValueError("candidate, trusted, and identity directories must be distinct and non-overlapping")
+            if trusted is not None and (source == trusted or source in trusted.parents or trusted in source.parents):
                 raise ValueError("candidate_dir and trusted_dir must be distinct and non-overlapping")
         if not command or any(
             not isinstance(arg, str) or not arg or "\x00" in arg for arg in command
@@ -139,6 +154,8 @@ class DockerSandboxRunner:
             ]
             if trusted is not None:
                 argv.extend(["--mount", f"type=bind,src={trusted},dst=/trusted,readonly"])
+            if identity is not None:
+                argv.extend(["--mount", f"type=bind,src={identity},dst=/identity,readonly"])
             for key, value in sorted(self.environment.items()):
                 argv.extend(["--env", f"{key}={value}"])
             argv.extend([self.image, *command])

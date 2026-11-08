@@ -58,3 +58,48 @@ Generated Python source is not imported or executed by this worker. Candidate
 code execution needs a separately reviewed harness and remains confined to
 the container boundary. The worker image itself is trusted code and must be
 built, reviewed, scanned, and pinned by digest in operator-controlled config.
+
+## Worker identity and signed evidence (Phase 7)
+
+The controller mounts an operator-provisioned identity directory read-only at
+`/identity`. It must contain `worker_ed25519_private.pem`; the private key is
+not baked into the image, passed through environment variables, or placed in
+candidate/trusted evaluation directories. The worker runs as UID/GID 65532, so
+provision the file so that this UID can read it while other host users cannot
+(for example, owner UID 65532 and mode 0400 on a dedicated worker host).
+
+Generate a keypair in a protected operator environment:
+
+    from mlac.attestation import generate_worker_keypair
+    key_id = generate_worker_keypair(
+        "./worker-identity/worker_ed25519_private.pem",
+        "./trusted-workers/worker_ed25519_public.pem",
+    )
+
+Register the public key bytes under that exact key_id in the controller's
+`trusted_worker_keys` mapping. Keep the private key out of Git, image layers,
+logs, CI artifacts, and the candidate/trusted input directories. Rotate keys
+by adding the new public key to controller trust configuration, deploying the
+new private key to the worker identity mount, then retiring the old key.
+
+The worker signs a canonical JSON report digest plus the SHA-256 digest of
+every direct regular file in both input mounts. The attestation includes
+worker_id, key_id, the configured immutable image digest, timestamp, and a
+random nonce. The controller independently hashes inputs before and after
+execution, verifies the signature and trusted key, checks the expected worker
+and image, then rejects previously used nonces in the durable artifact registry.
+
+This is a cryptographic identity assertion by the worker key, not remote
+attestation of the host, kernel, Docker daemon, or actual image measurement.
+The image digest is supplied by the controller's fixed command and signed by
+the worker; it is not an independent measurement. A compromised worker image
+with access to the private key can produce signed false evidence. Build,
+review, scan, and pin the worker image in a trusted release process.
+
+The local registry stores blobs under SHA-256-derived paths and metadata and
+evaluation links in SQLite. It detects content mismatch on read. It is not a
+WORM service, remote object store, encrypted backup system, or access-control
+boundary. Production deployments should use an independently administered
+object-lock/WORM backend, encryption, backup/restore testing, and restricted
+registry write permissions. The registry stores candidate and trusted input
+files as well as the report and attestation; protect it accordingly.

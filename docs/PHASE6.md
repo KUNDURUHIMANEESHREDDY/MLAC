@@ -53,4 +53,4 @@ A digest pin gives image immutability, not trustworthiness. Build the worker ima
 
 ## Limitations
 
-The worker report is trustworthy only to the extent that the pinned worker image and runtime are trusted. The Docker daemon, host kernel, and worker host remain part of the trusted computing base. The pipeline does not yet provide a remote worker fleet, durable artifact store, dataset registry, signed report attestation, or one-time production approval replay protection.
+The worker report is trustworthy only to the extent that the pinned worker image and runtime are trusted. The Docker daemon, host kernel, and worker host remain part of the trusted computing base. Phase 7 adds signed worker-result attestations and a local content-addressed artifact registry. Remote worker orchestration, remote/WORM artifact storage, signed dataset manifests, independent runtime measurement, and one-time production approval replay protection remain separate work.
