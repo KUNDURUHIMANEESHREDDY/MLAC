@@ -136,3 +136,8 @@ general-purpose reasoning benchmark. Dataset provenance, contamination
 controls, tokenizer consistency, and task-specific acceptance thresholds must
 be established by the operator. See `worker/README.md` for the manifest,
 dataset schema, and limits.
+
+
+## Architecture Inspector
+
+The read-only PyTorch inspector supports module/tensor metadata through `inspect_torch_model`. The extended `inspect_torch_model_full` API adds best-effort `torch.fx` graph nodes and connectivity, parameter mappings, shape propagation from trusted example inputs, attention/GQA metadata, explicit-dimension KV-cache estimates, and optional forward-memory measurements. See [docs/ARCHITECTURE_INSPECTOR.md](docs/ARCHITECTURE_INSPECTOR.md) for usage and interpretation limits. Graph tracing is not guaranteed for arbitrary dynamic models; KV-cache sizing is analytical, and module output-byte totals are not peak-live activation measurements.
