@@ -43,7 +43,8 @@ Both modes support finite classification or sequence logits with shape
 `[batch,...,classes]`; labels have the corresponding `[batch,...]` shape.
 This supports token-level next-token distillation and supervised LoRA updates
 for causal language models that accept integer token IDs. Held-out accuracy
-is token accuracy for sequence models. This is a trusted
+is token accuracy for sequence models; labels equal to `-100` are excluded
+from the supervised and distillation objectives and accuracy denominator. This is a trusted
 in-process library API: callers must supply reviewed model objects. The
 controller does not execute model or dataset code from an untrusted manifest.
 
