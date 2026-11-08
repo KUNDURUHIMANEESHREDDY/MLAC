@@ -1,4 +1,4 @@
-# Optional SQLite API state
+# API state stores
 
 MLAC's FastAPI surface supports PostgreSQL for durable production metadata and
 SQLite for single-host development. Both backends persist model/proposal metadata
