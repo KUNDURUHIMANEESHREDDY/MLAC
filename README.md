@@ -22,6 +22,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 - Optional S3 Object Lock COMPLIANCE artifact backend with versioned, content-addressed uploads.
 - Independent runtime-identity verifier for authority-signed SPIFFE/image/measurement statements, with durable nonce replay protection.
 - Evaluation-pipeline hooks for mandatory runtime evidence and remote artifact archival.
+- Optional API authentication with externally issued OIDC JWTs, JWKS signature verification, issuer/audience validation, and issuer/subject-scoped model and proposal access; bounded request bodies and pre-/post-authentication rate limits keep the API loopback-only until durable multi-tenant storage and deployment acceptance are complete.
 
 ## Quick start
 
@@ -31,7 +32,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
     pytest
     mlac version
 
-Optional API: pip install -e ".[api]" then mlac serve. Keep the unauthenticated API on localhost.
+Optional API: install `pip install -e ".[api]"` and configure `MLAC_API_JWKS_URL`, `MLAC_API_ISSUER`, and `MLAC_API_AUDIENCE` from a trusted OIDC provider before running `mlac serve`. Every non-health route requires a signed bearer JWT with issuer, audience, subject, issued-at, and expiry claims. The API verifies signing keys through the configured JWKS endpoint and scopes models/proposals to the issuer plus subject. Missing identity configuration fails closed with HTTP 503.
 
 ## Master Intelligence planning
 
@@ -95,7 +96,8 @@ The pipeline can authorize only a candidate operation. It does not deploy or pro
 - Candidate input and trusted evaluation artifacts are mounted read-only and separately; no controller, policy, recovery, credential, or home-directory mounts are provided.
 - Worker reports are trusted only to the extent that the reviewed, digest-pinned worker image and runtime are trusted.
 - Docker is not a complete defense against a compromised host, kernel, daemon, or runtime. Use a dedicated worker VM/host and stronger isolation for hostile code.
-- The optional API is unauthenticated; keep it on localhost.
+- The optional API requires OIDC JWT authentication and issuer/subject ownership checks for every non-health route. Request bodies are capped at 1 MiB; pre-authentication requests are limited per peer before JWKS resolution, and authenticated principals have a separate process-local limit. The CLI disables proxy-header trust and rejects non-loopback binds.
+- The API registry and both rate limiters remain process-local and non-durable; they do not coordinate across workers. Durable tenant-scoped storage, transactional migrations, distributed rate limiting, backup/restore, TLS gateway deployment, and deployed acceptance remain release blockers.
 - Trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
 
 See docs/ARCHITECTURE.md and docs/PHASE4.md through docs/PHASE7.md.
