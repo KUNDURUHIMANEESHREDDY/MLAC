@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import sys
 import time
-
-import pytest
 from types import SimpleNamespace
 
 import jwt
+import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
