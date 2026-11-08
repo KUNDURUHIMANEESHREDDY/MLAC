@@ -1,51 +1,55 @@
 # MLAC — Master LLM Architecture Controller
 
-MLAC is an open-source research and engineering platform for inspecting, modifying, validating, and experimentally optimizing machine-learning model architectures. It provides a model registry, a framework-neutral architecture representation, PyTorch inspection and mutation utilities, FX graph capture, candidate compatibility checks, and proposal-based self-evolution.
+MLAC is an open-source research and engineering platform for inspecting machine-learning models, representing structure in a framework-neutral intermediate representation (MLAC-IR), and managing governed architecture-change proposals.
 
-> **Status: early-stage MVP (v0.2.0).** MLAC is not yet capable of autonomously rewriting arbitrary frontier LLMs. Direct architecture/weight modification requires authorized access to model weights and a compatible runtime. API-only hosted models expose only their documented controls.
+> **Status: early MVP (v0.3.0).** This release includes MLAC-IR, an in-memory registry, optional PyTorch inspection, a small allow-listed IR metadata mutation, proposal-based evolution, governance defaults, and core tests. It does not autonomously redesign arbitrary LLMs, train models, rewrite live weights, or deploy candidates.
 
-## Current capabilities
-
-- Inspect PyTorch modules and export a framework-neutral MLAC-IR.
-- Capture computation graphs with PyTorch FX and optionally propagate example tensor shapes.
-- Validate candidate models for output structure, shape, dtype, and finite values.
-- Apply supported mutations including dropout changes and Linear/MLP widening while preserving existing parameter slices.
-- Register models in an in-memory runtime registry.
-- Enforce default-deny production mutation policy and parameter-growth limits.
-- Generate self-evolution proposals for review; proposals are not executed or promoted automatically.
-- Expose core operations through a FastAPI service.
+## Implemented
+- Framework-neutral architecture, component, and tensor representation.
+- In-memory model registry.
+- Optional read-only PyTorch module inspector.
+- Versioned dropout-configuration mutation on IR snapshots (not live model weights).
+- Proposal-only evolution controller.
+- Default-deny production mutation policy.
+- Unit tests for core behavior.
 
 ## Quick start
-
 ```bash
 python -m venv .venv
-# Linux/macOS: source .venv/bin/activate
-# Windows: .venv\\Scripts\\Activate.ps1
-pip install -e ".[dev]"
-pytest -q
-mlac serve
+source .venv/bin/activate
+pip install -e ".[dev,torch]"
+pytest
+mlac version
 ```
 
-The demo model is in `examples/tiny_model.py`. API documentation is available at `/docs` after starting the service.
+Optional API: `pip install -e ".[api]"` then `mlac serve`. API docs: http://127.0.0.1:8000/docs.
+
+## Inspect a model
+```python
+from examples.tiny_model import TinyMLP
+from mlac.inspector import inspect_torch_model
+snapshot = inspect_torch_model(TinyMLP(), name="tiny-mlp")
+print(snapshot.to_dict())
+```
 
 ## Safety and limitations
-
 - Production mutations are disabled by default.
-- Candidate compatibility does not prove task-quality improvement. Use representative datasets and task-specific benchmarks before promotion.
-- Structural changes may require retraining or fine-tuning.
-- Never load untrusted checkpoints or execute generated code in a privileged environment.
-- Keep governance, audit, authorization, and rollback controls outside the self-modification boundary.
+- Only inspect trusted, already-instantiated PyTorch modules; no untrusted checkpoint loading.
+- IR mutation is not a live neural-network topology or weight transformation.
+- Candidate proposals require independent evaluation before promotion.
+- Registry and proposal state are in memory and reset on restart.
+- The optional API is unauthenticated; keep it on localhost.
+- Training, GPU scheduling, sandbox execution, autonomous code generation, and production deployment are not implemented.
 
-See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Roadmap
-
-1. Architecture-aware transformer transformations and weight migration.
-2. Sandboxed candidate training and reproducible evaluation.
-3. Adapters for supported open-weight architectures.
-4. Durable experiment tracking, audit logs, and rollback.
-5. Provider adapters for controls exposed by hosted model APIs.
+1. Durable registry, artifacts, and audit log.
+2. Executable graph transformations and weight migration for supported model families.
+3. Isolated training and reproducible benchmark evaluation.
+4. Provider-independent master intelligence and experiment planning.
+5. Recursive controller evaluation with immutable recovery and authorization boundaries.
+6. Production hardening and deployment.
 
 ## License
-
 Apache-2.0. See [LICENSE](LICENSE).
