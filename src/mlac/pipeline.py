@@ -193,6 +193,26 @@ class CandidateEvaluationPipeline:
             raise ValueError("signed dataset manifest is not valid UTF-8 JSON") from exc
         dataset_provenance=verify_signed_dataset_manifest(
             dataset_envelope,trusted_path,trusted_signers=self.trusted_dataset_signers)
+        worker_manifest_path=trusted_path / "manifest.json"
+        if worker_manifest_path.is_symlink() or not worker_manifest_path.is_file():
+            raise PermissionError("operator-controlled worker manifest.json is required")
+        try:
+            worker_manifest=json.loads(worker_manifest_path.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError,json.JSONDecodeError) as exc:
+            raise ValueError("worker manifest is not valid UTF-8 JSON") from exc
+        if not isinstance(worker_manifest,dict):
+            raise ValueError("worker manifest must be a JSON object")
+        if worker_manifest.get("schema_version")==2:
+            required_dataset_files=[worker_manifest.get("dataset")]
+        elif worker_manifest.get("schema_version")==1:
+            required_dataset_files=[worker_manifest.get("input_tensor"),worker_manifest.get("target_tensor")]
+        else:
+            raise ValueError("worker manifest schema_version must be 1 or 2")
+        signed_paths={item["path"] for item in dataset_provenance["verified_files"]}
+        for relative in required_dataset_files:
+            if (not isinstance(relative,str) or Path(relative).name != relative
+                    or relative not in signed_paths):
+                raise PermissionError("every worker evaluation dataset/input file must be covered by the signed dataset manifest")
         before_digests = directory_digests(candidate_path, trusted_path)
         execution=self.runner.run(candidate_dir=candidate_path,trusted_dir=trusted_path,
             identity_dir=identity_path,command=[
