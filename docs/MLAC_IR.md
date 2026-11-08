@@ -69,7 +69,7 @@ architecture = Architecture(
     runtime_requirements=RuntimeRequirements(
         backend="pytorch",
         required_features=("bf16",),
-        allowed_dtypes=("bf16",),
+        required_dtypes=("bf16",),
     ),
 )
 
