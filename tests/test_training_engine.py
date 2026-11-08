@@ -108,6 +108,45 @@ def test_sequence_logits_support_token_distillation_and_lora_training():
     assert lora.lora_targets == ("proj",)
 
 
+def test_training_verifies_and_records_signed_dataset_manifest(tmp_path):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from mlac.dataset_manifest import create_signed_dataset_manifest
+    from mlac.training_engine import SignedDatasetBinding
+
+    for name, text in (("train.jsonl", "train"), ("validation.jsonl", "validation"), ("test.jsonl", "heldout")):
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    private_key = Ed25519PrivateKey.generate()
+    private_pem = private_key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    public_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    envelope = create_signed_dataset_manifest(
+        tmp_path, dataset_id="training-corpus", revision="signed-v1",
+        splits={
+            "train": ["train.jsonl"], "validation": ["validation.jsonl"],
+            "test": ["test.jsonl"],
+        },
+        signer_id="training-data-release", private_key_pem=private_pem,
+    )
+    dataset = make_dataset()
+    dataset = TrainingDataset(
+        dataset.train, dataset.validation, dataset.heldout, revision="signed-v1",
+        signed_manifest=SignedDatasetBinding(
+            tmp_path, envelope, {"training-data-release": public_pem},
+        ),
+    )
+    result = TrainingEngine().fit(
+        model=make_model(), teacher=make_model(), dataset=dataset,
+        mode="distillation", config=TrainingConfig(epochs=1, scheduler="none"),
+    )
+    assert result.summary()["dataset_signer_id"] == "training-data-release"
+    assert result.summary()["source_manifest_sha256"]
+
+
 def test_dataset_rejects_split_overlap_and_invalid_sample_identity():
     train = TensorSplit(torch.randn(4, 2), torch.tensor([0, 1, 0, 1]), ("a", "b", "c", "d"))
     overlap = TensorSplit(torch.randn(3, 2), torch.tensor([0, 1, 0]), ("x", "b", "y"))
