@@ -1,6 +1,5 @@
 import pytest
 
-from mlac.compiler import compile_architecture
 from mlac.designer import ArchitectureDesigner, DesignConstraints
 
 
@@ -33,6 +32,7 @@ def test_designer_respects_parameter_budget_and_target_ranking():
 
 def test_designer_compiles_to_executable_torch_module():
     pytest.importorskip("torch")
+    from mlac.compiler import compile_architecture
     candidate = ArchitectureDesigner().design(DesignConstraints(
         input_size=5, output_size=2, hidden_sizes=(8,),
         min_layers=1, max_layers=1, allowed_activations=("gelu",),
