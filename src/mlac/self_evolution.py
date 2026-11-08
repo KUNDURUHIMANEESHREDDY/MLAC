@@ -66,6 +66,12 @@ class ControllerEvolutionLedger:
                 "CREATE INDEX IF NOT EXISTS idx_controller_evolution_created "
                 "ON controller_evolution_runs(created_at)"
             )
+            db.execute("""CREATE TRIGGER IF NOT EXISTS controller_evolution_no_update
+                BEFORE UPDATE ON controller_evolution_runs
+                BEGIN SELECT RAISE(ABORT, 'controller evolution history is append-only'); END""")
+            db.execute("""CREATE TRIGGER IF NOT EXISTS controller_evolution_no_delete
+                BEFORE DELETE ON controller_evolution_runs
+                BEGIN SELECT RAISE(ABORT, 'controller evolution history is append-only'); END""")
 
     def _connect(self):
         db = sqlite3.connect(self.database, timeout=30)
