@@ -66,14 +66,29 @@ class TensorSplit:
 
 
 @dataclass(frozen=True)
+class SignedDatasetBinding:
+    """Operator-trusted signed source manifest and public signer trust store."""
+    dataset_root: str | Path
+    envelope: Mapping[str, Any]
+    trusted_signers: Mapping[str, bytes | str]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.envelope, Mapping) or not isinstance(self.trusted_signers, Mapping) or not self.trusted_signers:
+            raise ValueError("signed dataset binding requires an envelope and trusted signer keys")
+
+
+@dataclass(frozen=True)
 class TrainingDataset:
     """Train/validation/held-out splits with explicit, non-overlapping sample IDs."""
     train: TensorSplit
     validation: TensorSplit
     heldout: TensorSplit
     revision: str
+    signed_manifest: SignedDatasetBinding | None = None
 
     def __post_init__(self) -> None:
+        if self.signed_manifest is not None and not isinstance(self.signed_manifest, SignedDatasetBinding):
+            raise TypeError("signed_manifest must be a SignedDatasetBinding")
         if not isinstance(self.revision, str) or not self.revision.strip() or len(self.revision) > 256:
             raise ValueError("dataset revision must be a non-empty identifier of at most 256 characters")
         if any(not isinstance(split, TensorSplit) for split in (self.train, self.validation, self.heldout)):
@@ -196,6 +211,8 @@ class TrainingResult:
     config: TrainingConfig
     dataset_revision: str
     teacher_sha256: str | None
+    source_manifest_sha256: str | None
+    dataset_signer_id: str | None
     model: nn.Module = field(repr=False, compare=False)
     checkpoint_state: Mapping[str, Tensor] = field(repr=False, compare=False)
     checkpoint_sha256: str
@@ -216,6 +233,8 @@ class TrainingResult:
         return {
             "mode": self.mode, "training_config": asdict(self.config),
             "dataset_revision": self.dataset_revision, "teacher_sha256": self.teacher_sha256,
+            "source_manifest_sha256": self.source_manifest_sha256,
+            "dataset_signer_id": self.dataset_signer_id,
             "checkpoint_sha256": self.checkpoint_sha256,
             "dataset_sha256": self.dataset_sha256, "seed": self.seed,
             "best_epoch": self.best_epoch, "epochs_completed": self.epochs_completed,
@@ -319,6 +338,22 @@ class TrainingEngine:
             raise ValueError("teacher exceeds max_parameters")
         if dataset.train.labels is None or dataset.validation.labels is None or dataset.heldout.labels is None:
             raise ValueError("labels are required for all splits")
+        source_manifest_sha256 = None
+        dataset_signer_id = None
+        if dataset.signed_manifest is not None:
+            from mlac.dataset_manifest import verify_signed_dataset_manifest
+            verified = verify_signed_dataset_manifest(
+                dict(dataset.signed_manifest.envelope),
+                dataset.signed_manifest.dataset_root,
+                trusted_signers=dataset.signed_manifest.trusted_signers,
+            )
+            if verified["revision"] != dataset.revision:
+                raise ValueError("signed dataset manifest revision does not match TrainingDataset revision")
+            split_names = {item["split"] for item in verified["verified_files"]}
+            if not {"train", "validation"}.issubset(split_names) or not ({"heldout", "test"} & split_names):
+                raise ValueError("signed dataset manifest must declare train, validation, and heldout/test splits")
+            source_manifest_sha256 = verified["manifest_sha256"]
+            dataset_signer_id = verified["signer_id"]
 
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(config.seed)
@@ -430,6 +465,7 @@ class TrainingEngine:
         return TrainingResult(
             mode=mode, config=config, dataset_revision=dataset.revision,
             teacher_sha256=_state_digest(teacher_copy.state_dict()) if teacher_copy is not None else None,
+            source_manifest_sha256=source_manifest_sha256, dataset_signer_id=dataset_signer_id,
             model=candidate, checkpoint_state=state,
             checkpoint_sha256=_state_digest(state), dataset_sha256=dataset.digest,
             seed=config.seed, best_epoch=best_epoch, epochs_completed=len(history),
