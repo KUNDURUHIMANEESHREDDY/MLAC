@@ -286,12 +286,16 @@ def create_app(
         elif database_path:
             state_store = SQLiteStateStore(database_path)
 
-    if os.getenv("MLAC_REQUIRE_POSTGRES_STATE", "").lower() in {"1", "true", "yes"}:
-        if not isinstance(state_store, PostgresStateStore):
-            raise RuntimeError("Production mode requires PostgreSQL state storage")
-    if os.getenv("MLAC_REQUIRE_SHARED_RATE_LIMITER", "").lower() in {"1", "true", "yes"}:
-        if not os.getenv("MLAC_RATE_LIMIT_REDIS_URL"):
-            raise RuntimeError("Production mode requires shared Redis rate limiting")
+    if (
+        os.getenv("MLAC_REQUIRE_POSTGRES_STATE", "").lower() in {"1", "true", "yes"}
+        and not isinstance(state_store, PostgresStateStore)
+    ):
+        raise RuntimeError("Production mode requires PostgreSQL state storage")
+    if (
+        os.getenv("MLAC_REQUIRE_SHARED_RATE_LIMITER", "").lower() in {"1", "true", "yes"}
+        and not os.getenv("MLAC_RATE_LIMIT_REDIS_URL")
+    ):
+        raise RuntimeError("Production mode requires shared Redis rate limiting")
 
     model_store = (
         model_registry
