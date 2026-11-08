@@ -126,6 +126,7 @@ class CompatibilityConstraint:
 class RuntimeRequirements:
     backend: str | None = None
     required_features: tuple[str, ...] = ()
+    required_devices: tuple[str, ...] = ()
     required_dtypes: tuple[str, ...] = ()
     minimum_memory_bytes: int | None = None
     maximum_sequence_length: int | None = None
@@ -271,7 +272,7 @@ class Architecture:
                 if missing:
                     errors.append(f"weight transformation references unmapped parameters: {', '.join(sorted(missing))}")
         runtime_targets = {
-            "backend", "features", "supported_dtypes", "available_memory_bytes",
+            "backend", "features", "devices", "supported_dtypes", "available_memory_bytes",
             "maximum_sequence_length",
         }
         for constraint in self.compatibility_constraints:
@@ -338,6 +339,9 @@ def validate_compatibility(
     missing_features = set(requirements.required_features) - set(runtime.features)
     if missing_features:
         issues.append(f"runtime is missing features: {', '.join(sorted(missing_features))}")
+    missing_devices = set(requirements.required_devices) - set(runtime.devices)
+    if missing_devices:
+        issues.append(f"runtime is missing devices: {', '.join(sorted(missing_devices))}")
     required_dtypes = set(requirements.required_dtypes)
     required_dtypes.update(
         tensor.dtype for tensor in architecture.tensors if tensor.dtype != "unknown"
@@ -355,6 +359,7 @@ def validate_compatibility(
     values: dict[str, Any] = {
         "backend": runtime.backend,
         "features": set(runtime.features),
+        "devices": set(runtime.devices),
         "supported_dtypes": set(runtime.supported_dtypes),
         "available_memory_bytes": runtime.available_memory_bytes,
         "maximum_sequence_length": runtime.maximum_sequence_length,
