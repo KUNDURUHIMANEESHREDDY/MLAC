@@ -63,11 +63,23 @@ Resolve its immutable image digest and configure that digest in DockerSandboxRun
     from mlac.experiments import ExperimentStore
     from mlac.artifact_registry import ArtifactRegistry
     from mlac.attestation import key_id_for_public_key
+    from mlac.dataset_manifest import create_signed_dataset_manifest
     from cryptography.hazmat.primitives import serialization
 
     image = "registry.example/mlac-worker@sha256:<64-hex-digest>"
     worker_identity_dir = Path("./worker-identity")
     trusted_public_key = Path("./trusted-workers/worker-ed25519-public.pem").read_bytes()
+    dataset_signing_key = Path("/secure/dataset-signing-key.pem").read_bytes()
+    dataset_public_key = Path("/etc/mlac/trust/dataset-release-prod.pem").read_bytes()
+    trusted_evaluation_dir = Path("./operator-controlled-evaluation")
+    dataset_manifest = create_signed_dataset_manifest(
+        trusted_evaluation_dir, dataset_id="heldout-eval", revision="v1",
+        splits={"test": ["evaluation.jsonl"]}, signer_id="dataset-release-prod",
+        private_key_pem=dataset_signing_key,
+    )
+    (trusted_evaluation_dir / "dataset-manifest.json").write_text(
+        json.dumps(dataset_manifest), encoding="utf-8"
+    )
     key_id = key_id_for_public_key(serialization.load_pem_public_key(trusted_public_key))
     pipeline = CandidateEvaluationPipeline(
         runner=DockerSandboxRunner(image=image),
@@ -78,17 +90,18 @@ Resolve its immutable image digest and configure that digest in DockerSandboxRun
             "dataset-release-prod": Path("/etc/mlac/trust/dataset-release-prod.pem").read_bytes(),
         },
         worker_identity_dir=worker_identity_dir,
+        trusted_dataset_signers={"dataset-release-prod": dataset_public_key},
         artifact_registry=ArtifactRegistry("./mlac-artifacts"),
     )
     result = pipeline.run(
         candidate_dir="./candidate-bundle",
-        trusted_evaluation_dir="./operator-controlled-evaluation",
+        trusted_evaluation_dir=trusted_evaluation_dir,
         model_id="baseline-model-id",
         candidate_id="candidate-001",
     )
     print(result.status, result.evaluation.evaluation_id)
 
-The worker identity directory contains worker_ed25519_private.pem and is mounted read-only at /identity. Protect the private key so only the worker UID (65532 in the container) can read it; do not commit it or bake it into the image. Register the corresponding public key in controller trust configuration. The worker signs the canonical report and hashes of every direct input artifact. The controller verifies the signature, worker key, configured image digest, report hash, and independently re-hashed inputs before evaluation. The SQLite artifact registry stores immutable SHA-256-addressed blobs and links them to the evaluation; a persistent nonce table rejects replayed attestations. See docs/PHASE7.md for worker-key provisioning and docs/MILESTONE_REMOTE_TRUST.md for remote WORM storage and runtime identity deployment. These are opt-in primitives; production use requires an independently operated attestation authority and an orchestrator that supplies evidence outside the worker container.
+The worker identity directory contains worker_ed25519_private.pem and is mounted read-only at /identity. Protect the private key so only the worker UID (65532 in the container) can read it; do not commit it or bake it into the image. Register the corresponding public key in controller trust configuration. The worker signs the canonical report and hashes of every direct input artifact. The controller verifies the signature, worker key, configured image digest, report hash, and independently re-hashed inputs before evaluation. The controller verifies the signed dataset manifest and checks that the worker manifest references signed evaluation files before the worker starts. The SQLite artifact registry stores immutable SHA-256-addressed blobs and links them to the evaluation; a persistent nonce table rejects replayed attestations. See docs/PHASE7.md for worker-key provisioning and docs/MILESTONE_REMOTE_TRUST.md for remote WORM storage and runtime identity deployment. These are opt-in primitives; production use requires an independently operated attestation authority and an orchestrator that supplies evidence outside the worker container.
 
 The pipeline can authorize only a candidate operation. It does not deploy or promote to production. The initial worker does not execute generated Python source; that requires a separately reviewed harness. See worker/README.md, docs/PHASE5.md, docs/PHASE6.md, and docs/PHASE7.md.
 
@@ -123,9 +136,11 @@ split consistency, and every dataset file's bytes. See
 [docs/DATASET_MANIFESTS.md](docs/DATASET_MANIFESTS.md) for creation and
 verification examples.
 
-This is a provenance primitive: it is not yet automatically enforced by every
-training/evaluation workflow. Dataset licensing, contamination controls,
-semantic preprocessing consistency, and benchmark suitability remain
+Signed provenance is enforced by the candidate evaluation pipeline and
+Training Engine. Training manifests also bind the exact materialized tensor
+fingerprint, and evaluation manifests must cover the dataset/input files named
+by the trusted worker manifest. Dataset licensing, contamination controls,
+source-to-tensor preprocessing correctness, and benchmark suitability remain
 operator responsibilities.
 
 ## License
