@@ -6,8 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple torch==2.5.1 'cryptography>=42' 'transformers==4.48.3' 'safetensors==0.5.3'
 
-RUN mkdir -p /opt/mlac-worker/lib/mlac
-COPY src/mlac/__init__.py /opt/mlac-worker/lib/mlac/__init__.py
+RUN mkdir -p /opt/mlac-worker/lib/mlac && printf '%s\\n' '"""Minimal isolated worker package namespace."""' > /opt/mlac-worker/lib/mlac/__init__.py
 COPY src/mlac/ir.py /opt/mlac-worker/lib/mlac/ir.py
 COPY src/mlac/registry.py /opt/mlac-worker/lib/mlac/registry.py
 COPY src/mlac/transformer.py /opt/mlac-worker/lib/mlac/transformer.py
