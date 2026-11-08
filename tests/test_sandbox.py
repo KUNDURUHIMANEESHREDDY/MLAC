@@ -62,3 +62,13 @@ def test_candidate_and_trusted_inputs_must_be_separate(tmp_path):
     runner = DockerSandboxRunner(image=DIGEST_IMAGE)
     with pytest.raises(ValueError, match="must be distinct"):
         runner.run(candidate_dir=tmp_path, trusted_dir=tmp_path, command=["/worker"])
+
+def test_candidate_and_trusted_inputs_cannot_nest(tmp_path):
+    import pytest
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    trusted = candidate / "trusted"
+    trusted.mkdir()
+    runner = DockerSandboxRunner(image=DIGEST_IMAGE)
+    with pytest.raises(ValueError, match="non-overlapping"):
+        runner.run(candidate_dir=candidate, trusted_dir=trusted, command=["/worker"])

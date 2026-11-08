@@ -104,8 +104,8 @@ class DockerSandboxRunner:
                 raise ValueError("trusted_dir must be an existing directory") from exc
             if not trusted.is_dir():
                 raise ValueError("trusted_dir must be an existing directory")
-            if trusted == source:
-                raise ValueError("candidate_dir and trusted_dir must be distinct")
+            if trusted == source or trusted in source.parents or source in trusted.parents:
+                raise ValueError("candidate_dir and trusted_dir must be distinct and non-overlapping")
         if not command or any(
             not isinstance(arg, str) or not arg or "\x00" in arg for arg in command
         ):
