@@ -63,6 +63,7 @@ Resolve its immutable image digest and configure that digest in DockerSandboxRun
     from mlac.experiments import ExperimentStore
     from mlac.artifact_registry import ArtifactRegistry
     from mlac.attestation import key_id_for_public_key
+    from mlac.dataset_manifest import verify_signed_dataset_manifest
     from cryptography.hazmat.primitives import serialization
 
     image = "registry.example/mlac-worker@sha256:<64-hex-digest>"
