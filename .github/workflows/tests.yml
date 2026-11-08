@@ -12,5 +12,5 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[dev,torch]"
+      - run: pip install -e ".[dev,torch,api]"
       - run: pytest
