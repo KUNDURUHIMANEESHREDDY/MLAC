@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
-from typing import Any, Iterable
+from typing import Any
 
 
 IR_SCHEMA_VERSION = 1
