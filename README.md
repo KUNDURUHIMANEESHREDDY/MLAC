@@ -149,6 +149,17 @@ structural validation, runtime compatibility checks, serialization, and stable
 fingerprints. See [docs/MLAC_IR.md](docs/MLAC_IR.md) for the schema, examples,
 invariants, and current limitations.
 
+## Weight Engine
+
+The unified PyTorch Weight Engine applies transactional, allow-listed
+unstructured/structured pruning, simulated symmetric INT8 quantization,
+LoRA injection and merge/unmerge, distillation-loss computation, and explicit
+shape/dtype-checked checkpoint migration. It reports parameter sparsity,
+counts, quantization error, and per-operation metrics. See
+[docs/WEIGHT_ENGINE.md](docs/WEIGHT_ENGINE.md) for APIs and limitations.
+Fake quantization retains floating-point storage, and zero-masking does not
+guarantee runtime acceleration; all candidates require independent evaluation.
+
 ## Architecture Inspector
 
 The read-only PyTorch inspector supports module/tensor metadata through `inspect_torch_model`. The extended `inspect_torch_model_full` API adds best-effort `torch.fx` graph nodes and connectivity, parameter mappings, shape propagation from trusted example inputs, attention/GQA metadata, explicit-dimension KV-cache estimates, and optional forward-memory measurements. See [docs/ARCHITECTURE_INSPECTOR.md](docs/ARCHITECTURE_INSPECTOR.md) for usage and interpretation limits. Graph tracing is not guaranteed for arbitrary dynamic models; KV-cache sizing is analytical, and module output-byte totals are not peak-live activation measurements.
