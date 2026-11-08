@@ -7,7 +7,7 @@ This runbook describes a safe, isolated restore of a downloaded SQLite state bac
 - Download the backup object from the configured Object Lock bucket into an operator-controlled directory.
 - Obtain the expected SHA-256 value from the trusted S3 object metadata or the separately retained backup record. Do not derive the expected value from the downloaded file.
 - Keep the downloaded backup and restore destination in directories accessible only to the operator.
-- The destination directory must already exist and must not be group- or world-writable.
+- The destination directory must already exist, must not be group- or world-writable, and must support POSIX directory fsync (the utility fails closed on non-POSIX platforms).
 - The destination file must not exist. The restore utility refuses to overwrite any existing path.
 
 ## SQLite restore
@@ -22,7 +22,7 @@ python -m scripts.restore_backup \
   --sha256 '<trusted-64-character-sha256>'
 ```
 
-The utility first calls `scripts.verify_backup` to verify the trusted digest and SQLite integrity. It then copies the database through SQLite's online backup API, runs `PRAGMA integrity_check` on the restored file, records the table count, and leaves the result with mode `0600`. It creates the destination with exclusive-create semantics and never replaces an existing file. If verification or copying fails, it removes only the file it created.
+The utility first calls `scripts.verify_backup` to verify the trusted digest and SQLite integrity. It then copies the database through SQLite's online backup API, runs `PRAGMA integrity_check` on the restored file, records the table count, and leaves the result with mode `0600`. It creates the destination with exclusive-create semantics and never replaces an existing file. It fsyncs both the restored file and its parent directory before reporting success. If verification or copying fails, it removes only the file it created.
 
 Inspect the restored database without enabling writes:
 
