@@ -8,7 +8,7 @@ This runbook describes a safe, isolated restore of a downloaded SQLite state bac
 - Obtain the expected SHA-256 value from the trusted S3 object metadata or the separately retained backup record. Do not derive the expected value from the downloaded file.
 - Keep the downloaded backup and restore destination in directories accessible only to the operator.
 - The destination directory must already exist, must not be group- or world-writable, and must support POSIX directory fsync (the utility fails closed on non-POSIX platforms).
-- The destination file must not exist. The restore utility refuses to overwrite any existing path.
+- The destination file and its SQLite sidecar paths (`-wal`, `-shm`, and `-journal`) must not exist. The restore utility refuses to overwrite any existing path or open SQLite when a destination-named sidecar is already present.
 
 ## SQLite restore
 
