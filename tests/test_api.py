@@ -396,3 +396,18 @@ def test_sqlite_proposal_listing_decodes_only_authenticated_owner_rows(tmp_path)
     assert [item["proposal_id"] for item in response.json()] == [
         alice_proposal["proposal_id"]
     ]
+
+
+def test_production_mode_requires_postgres_and_shared_redis(monkeypatch):
+    """Prevent production startup from silently using process-local state."""
+    monkeypatch.setenv("MLAC_REQUIRE_POSTGRES_STATE", "true")
+    monkeypatch.delenv("MLAC_API_DATABASE_URL", raising=False)
+    monkeypatch.delenv("MLAC_API_STATE_DB", raising=False)
+    with pytest.raises(RuntimeError, match="requires PostgreSQL"):
+        create_app()
+
+    monkeypatch.delenv("MLAC_REQUIRE_POSTGRES_STATE", raising=False)
+    monkeypatch.setenv("MLAC_REQUIRE_SHARED_RATE_LIMITER", "true")
+    monkeypatch.delenv("MLAC_RATE_LIMIT_REDIS_URL", raising=False)
+    with pytest.raises(RuntimeError, match="requires shared Redis"):
+        create_app()
