@@ -212,6 +212,9 @@ their declared supported PyTorch dtypes before applying initialization. The exec
 and returns a report; it does not mutate the caller's input mapping. If any
 step fails, no partial result is returned. Operations execute in declaration
 order, so a later step may consume a target created by an earlier step.
+`strict=True` (the default) fails on missing source parameters; `strict=False`
+skips that transformation and records the reason in the report's `skipped`
+field.
 
 The executor transforms tensors supplied by the caller; it does not fetch
 checkpoints, write artifact storage, train models, or promote a candidate.
