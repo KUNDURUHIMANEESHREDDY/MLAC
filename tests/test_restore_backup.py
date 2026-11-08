@@ -39,6 +39,23 @@ def test_restore_creates_private_integrity_checked_copy(tmp_path: Path) -> None:
         assert restored.execute("SELECT value FROM state").fetchone() == ("preserved",)
 
 
+@pytest.mark.parametrize("suffix", ["-wal", "-shm", "-journal"])
+def test_restore_refuses_existing_sqlite_sidecars(tmp_path: Path, suffix: str) -> None:
+    """Preserve destination-named SQLite sidecars rather than letting SQLite replace them."""
+    backup = tmp_path / "backup.sqlite3"
+    digest = _backup(backup)
+    destination = tmp_path / "isolated" / "restored.sqlite3"
+    destination.parent.mkdir(mode=0o700)
+    sidecar = destination.with_name(destination.name + suffix)
+    sidecar.write_bytes(b"operator-owned-sidecar")
+
+    with pytest.raises(FileExistsError, match="SQLite sidecar already exists"):
+        restore_sqlite_backup(backup, destination, digest)
+
+    assert sidecar.read_bytes() == b"operator-owned-sidecar"
+    assert not destination.exists()
+
+
 def test_restore_refuses_to_overwrite_existing_destination(tmp_path: Path) -> None:
     backup = tmp_path / "backup.sqlite3"
     digest = _backup(backup)
