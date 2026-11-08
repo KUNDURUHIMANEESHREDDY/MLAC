@@ -14,13 +14,16 @@ governance, policy, API, and recovery modules.
 
 The controller mounts two different host directories:
 
-- candidate directory -> /workspace (read-only), containing candidate.pt only
+- candidate directory -> /workspace (read-only), containing candidate.pt and candidate_manifest.json
 - operator-managed evaluation directory -> /trusted (read-only), containing manifest.json, baseline.pt, input.pt, and target.pt
 
 Never place the trusted evaluation directory under candidate-controlled storage.
 The pipeline requires both directories separately and DockerSandboxRunner rejects
-using the same directory for both mounts. The candidate cannot replace the
-baseline, input, target, architecture, or worker command.
+using the same directory for both mounts. The candidate cannot replace the baseline, input, target, trusted architecture,
+or worker command. candidate_manifest.json declares one allow-listed structural
+operation and bounded parameters; the fixed worker independently validates it,
+reconstructs the candidate architecture from the trusted baseline, and strictly
+loads candidate.pt into that reconstructed structure.
 
 Example trusted manifest:
 
