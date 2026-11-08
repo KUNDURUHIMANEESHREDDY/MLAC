@@ -1,13 +1,13 @@
 # MLAC 1.0 production deployment
 
-This runbook deploys the OIDC-authenticated API as a single API instance behind Caddy TLS, with a persistent SQLite metadata volume and Redis-backed shared rate limits. It is intentionally not an HA/multi-replica topology: SQLite remains the authoritative metadata store and must be kept on one host with reliable local filesystem locking.
+This runbook deploys the OIDC-authenticated API as a single API instance behind Caddy TLS, with a persistent PostgreSQL metadata volume and Redis-backed shared rate limits. PostgreSQL and Redis are shared services; the API can be replicated behind an orchestrator when the deployment has sufficient resource and connection limits.
 
 ## Runtime boundaries
 
 - Caddy is the only service with published ports. The API and Redis have no host-published ports.
 - Caddy terminates HTTPS and forwards requests over a dedicated Docker network. Uvicorn trusts proxy headers only from Caddy's pinned address (172.30.0.2).
 - The API runs as UID/GID 10001, with a read-only root filesystem, dropped Linux capabilities, and no-new-privileges.
-- SQLite persists API model/proposal metadata on the mlac-data volume. It is not a multi-host database.
+- PostgreSQL persists tenant-scoped model/proposal metadata on the postgres-data volume. It is not exposed outside the private Docker network.
 - Redis uses AOF persistence and is reachable only on an internal Docker network. Both pre-authentication peer limits and authenticated-principal limits use atomic Redis Lua operations and Redis server time.
 - If Redis is unavailable, readiness fails and protected requests fail closed with HTTP 503.
 - Model weights, evaluation datasets, worker images, and content-addressed artifacts remain separate from the API metadata database.
@@ -19,7 +19,7 @@ This runbook deploys the OIDC-authenticated API as a single API instance behind 
 - Inbound TCP 80 and 443 (and optionally UDP 443) allowed to the host.
 - A persistent, encrypted host disk with monitored free space and restricted administrator access.
 - An OIDC provider with a production issuer, audience, and HTTPS JWKS endpoint.
-- A strong Redis password and a private .env file.
+- Strong PostgreSQL and Redis passwords and a private .env file.
 - A tested backup bucket with S3 versioning and Object Lock COMPLIANCE enabled.
 
 The main-branch workflow publishes immutable image tags to ghcr.io/kunduruhimaneeshreddy/mlac, including sha-<commit>. Pin MLAC_IMAGE to the exact commit that passed CI; do not deploy the mutable main tag. The default Docker subnet is 172.30.0.0/24. Change the subnet and the pinned proxy IP together in docker-compose.yml, Dockerfile, and this runbook if it conflicts with the host network.
@@ -28,7 +28,7 @@ The main-branch workflow publishes immutable image tags to ghcr.io/kunduruhimane
 
 1. Clone the repository and enter its directory.
 2. Copy .env.example to .env and restrict it with chmod 600.
-3. Set MLAC_IMAGE to the immutable sha-<commit> tag published by the main-branch container workflow. Authenticate to ghcr.io with a read:packages credential if the package is private.
+3. Set MLAC_IMAGE to the immutable sha-<commit> tag published by the main-branch container workflow. Authenticate to ghcr.io with a read:packages credential if the package is private. Set MLAC_POSTGRES_PASSWORD and MLAC_API_DATABASE_URL to the same URL-encoded password, and use sslmode=require for remote managed PostgreSQL.
 4. Edit .env with the real domain and OIDC values. Generate a strong random MLAC_REDIS_PASSWORD; URL-encode reserved characters when placing the password in MLAC_RATE_LIMIT_REDIS_URL. The Redis server password and URL password must match exactly. Never commit .env.
 5. Pull the pinned image and start:
 
@@ -43,11 +43,11 @@ Caddy obtains and renews the TLS certificate after DNS and inbound ports are cor
     curl --fail --show-error https://$MLAC_DOMAIN/health
     curl --fail --show-error https://$MLAC_DOMAIN/ready
 
-/ready must report storage: sqlite. The endpoint returns 503 if OIDC configuration, SQLite, or Redis readiness checks fail. Verify an authenticated request with a real production-issued OIDC token and verify that a second principal cannot read the first principal's models or proposals.
+/ready must report storage: postgres. The endpoint returns 503 if OIDC configuration, SQLite, or Redis readiness checks fail. Verify an authenticated request with a real production-issued OIDC token and verify that a second principal cannot read the first principal's models or proposals.
 
 ## Operational controls
 
-- Keep one MLAC API replica while SQLite is the metadata backend. Do not mount the same SQLite database into multiple hosts or place it on an unverified network filesystem.
+- PostgreSQL and Redis are the shared state backends for API replicas. Keep their ports private, size PostgreSQL connection limits for the number of API workers, and keep database/Redis volumes on encrypted persistent storage.
 - Do not publish Redis or the API port. Restrict SSH and Docker administration to trusted operators.
 - Keep .env, SQLite data, Redis data, Caddy state, and backups out of source control and public artifacts.
 - Configure host-level encrypted disk, unattended security updates, firewall policy, log collection, alerting, and a host restart policy.
@@ -58,7 +58,7 @@ Caddy obtains and renews the TLS certificate after DNS and inbound ports are cor
 
 ## Immutable database backups
 
-Create an S3 bucket with versioning and Object Lock enabled at bucket creation. Configure bucket-level default retention and access policies independently. The backup utility additionally verifies versioning and Object Lock are enabled and uploads each SQLite online backup in COMPLIANCE mode with a retention date and SHA-256 metadata.
+Create an S3 bucket with versioning and Object Lock enabled at bucket creation. Configure bucket-level default retention and access policies independently. The backup utility additionally verifies versioning and Object Lock are enabled. It creates a PostgreSQL custom-format dump, validates it with pg_restore, and uploads it in COMPLIANCE mode with a retention date and SHA-256 metadata. SQLite online backups remain supported for local deployments.
 
 Run a backup manually:
 
@@ -66,7 +66,7 @@ Run a backup manually:
 
 Schedule the same command from a restricted host scheduler (for example, a systemd timer) at the recovery-point objective approved by the operator. Alert on non-zero exit status and on a missing recent backup. The backup role should have only the required bucket inspection and object upload permissions; it must not be able to shorten Object Lock retention or delete protected versions.
 
-Restore drills must be performed in an isolated environment. Download a retained backup, verify its SHA-256 against trusted backup metadata, run PRAGMA integrity_check, restore while the API is stopped, then verify /ready, tenant isolation, and representative model/proposal reads. Record the achieved recovery point and recovery time.
+Restore drills must be performed in an isolated environment. Download a retained backup and verify its SHA-256 against trusted backup metadata. For PostgreSQL, validate the archive with pg_restore --list, stop the API, and restore with pg_restore --no-owner --no-acl --clean --if-exists --exit-on-error. For SQLite, run PRAGMA integrity_check and restore while the API is stopped. Then verify /ready, tenant isolation, and representative model/proposal reads. Record the achieved recovery point and recovery time.
 
 ## Rollback and recovery
 
@@ -79,10 +79,10 @@ Restore drills must be performed in an isolated environment. Download a retained
 
 - [ ] Real OIDC issuer/audience/JWKS configured; invalid and expired tokens rejected.
 - [ ] Public HTTPS certificate valid; API and Redis ports not externally reachable.
-- [ ] /ready reports SQLite and Redis healthy.
+- [ ] /ready reports PostgreSQL and Redis healthy.
 - [ ] Cross-tenant model and proposal isolation verified with two real principals.
 - [ ] Redis rate limiting verified across separate API processes.
-- [ ] SQLite data survives container recreation and host restart.
+- [ ] PostgreSQL data survives container recreation and host restart.
 - [ ] S3 versioning and Object Lock COMPLIANCE backup uploaded and retained.
 - [ ] Restore drill completed and recovery metrics recorded.
 - [ ] Runtime image digest, host patching, monitoring, alerting, and incident-response ownership recorded.
