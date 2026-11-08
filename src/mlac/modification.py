@@ -92,8 +92,8 @@ class MixtureOfExperts(nn.Module):
             raise ValueError("d_model must be positive and num_experts must be at least 2")
         if not 1 <= top_k <= num_experts:
             raise ValueError("top_k must be between 1 and num_experts")
-        if expert_noise_std < 0:
-            raise ValueError("expert_noise_std must be non-negative")
+        if not isinstance(expert_noise_std, (int, float)) or not torch.isfinite(torch.tensor(float(expert_noise_std))) or expert_noise_std < 0:
+            raise ValueError("expert_noise_std must be a finite non-negative number")
         self.d_model = int(d_model)
         self.num_experts = int(num_experts)
         self.top_k = int(top_k)
@@ -198,17 +198,21 @@ def _resize_attention_heads(block: TransformerBlock, num_heads: int) -> dict[str
     new = PrunableSelfAttention(
         old.d_model, num_heads, bias=old.qkv.bias is not None, head_dim=old.head_dim
     ).to(device=old.qkv.weight.device, dtype=old.qkv.weight.dtype)
+    new.train(block.training)
     retained_count = min(old.num_heads, num_heads)
     indices = torch.arange(retained_count * old.head_dim, device=old.qkv.weight.device)
-    qkv_indices = torch.cat((indices, indices + old.inner_dim, indices + 2 * old.inner_dim))
+    retained_width = retained_count * old.head_dim
     with torch.no_grad():
-        new.qkv.weight[: 3 * retained_count * old.head_dim].copy_(
-            old.qkv.weight.index_select(0, qkv_indices)
-        )
-        if old.qkv.bias is not None:
-            new.qkv.bias[: 3 * retained_count * old.head_dim].copy_(
-                old.qkv.bias.index_select(0, qkv_indices)
+        for section in range(3):
+            old_start = section * old.inner_dim
+            new_start = section * new.inner_dim
+            new.qkv.weight[new_start : new_start + retained_width].copy_(
+                old.qkv.weight[old_start : old_start + retained_width]
             )
+            if old.qkv.bias is not None:
+                new.qkv.bias[new_start : new_start + retained_width].copy_(
+                    old.qkv.bias[old_start : old_start + retained_width]
+                )
         new.out_proj.weight[:, : retained_count * old.head_dim].copy_(
             old.out_proj.weight.index_select(1, indices)
         )
@@ -244,6 +248,7 @@ def _add_transformer_block(module: nn.Sequential, config: Mapping[str, Any]) -> 
     if reference is not None:
         parameter = next(reference.parameters())
         block = block.to(device=parameter.device, dtype=parameter.dtype)
+    block.train(module.training)
     layers = list(module.children())
     layers.insert(index, block)
     module.__init__(*layers)
@@ -285,11 +290,11 @@ def _apply_one(module: nn.Module, item: Modification) -> dict[str, Any]:
     if operation == "resize_attention_heads":
         if not isinstance(module, TransformerBlock):
             raise TypeError("resize_attention_heads requires a TransformerBlock root")
-        return _resize_attention_heads(module, int(config["num_heads"]))
+        return _resize_attention_heads(module, config["num_heads"])
     if operation == "resize_mlp_hidden":
         if not isinstance(module, TransformerBlock):
             raise TypeError("resize_mlp_hidden requires a TransformerBlock root")
-        return _resize_mlp_hidden(module, int(config["hidden_size"]))
+        return _resize_mlp_hidden(module, config["hidden_size"])
     if operation == "set_mlp_activation":
         if not isinstance(module, TransformerBlock):
             raise TypeError("set_mlp_activation requires a TransformerBlock root")
@@ -314,6 +319,7 @@ def _apply_one(module: nn.Module, item: Modification) -> dict[str, Any]:
             module.mlp, d_model=module.d_model, num_experts=experts,
             top_k=top_k, expert_noise_std=noise,
         ).to(device=parameter.device, dtype=parameter.dtype)
+        moe.train(module.mlp.training)
         module.mlp = moe
         return {"num_experts": experts, "top_k": top_k, "expert_noise_std": noise}
     if operation == "add_transformer_block":
