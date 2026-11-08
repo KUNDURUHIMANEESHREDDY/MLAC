@@ -114,4 +114,3 @@ def test_publisher_serializes_main_and_skips_superseded_main_tags() -> None:
     assert "${IMAGE_NAME}:sha-${EXPECTED_SHA}" in source
     assert "tags: ${{ steps.tags.outputs.tags }}" in source
     assert "mlac-container-${{ github.event.workflow_run.head_sha }}" not in source
-}
