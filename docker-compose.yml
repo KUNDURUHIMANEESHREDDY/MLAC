@@ -6,6 +6,8 @@ services:
     environment:
       MLAC_API_DATABASE_URL: ${MLAC_API_DATABASE_URL:?Set the private PostgreSQL URL}
       MLAC_RATE_LIMIT_REDIS_URL: ${MLAC_RATE_LIMIT_REDIS_URL:?Set a private Redis URL}
+      MLAC_REQUIRE_POSTGRES_STATE: "true"
+      MLAC_REQUIRE_SHARED_RATE_LIMITER: "true"
     expose:
       - "8000"
     networks:
@@ -21,7 +23,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)"
       interval: 15s
       timeout: 3s
       retries: 5
