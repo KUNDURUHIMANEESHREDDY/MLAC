@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -136,3 +137,35 @@ def test_verify_backup_rejects_explicit_format_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="format mismatch"):
         verify_backup(backup, digest, "postgres-custom")
+
+
+
+def test_verify_backup_rejects_in_place_change_after_digest_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same-inode, same-size edits after hashing must invalidate the file identity."""
+    backup = tmp_path / "state.sqlite3"
+    digest = _sqlite_backup(backup)
+    before = backup.stat()
+
+    def mutate_after_hash(path: Path) -> str:
+        with path.open("r+b") as handle:
+            handle.seek(0)
+            handle.write(b"X")
+        os.utime(
+            path,
+            ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000),
+        )
+        return "sqlite"
+
+    monkeypatch.setattr("scripts.verify_backup._detect_format", mutate_after_hash)
+
+    after = backup.stat()
+    assert (after.st_dev, after.st_ino, after.st_size) == (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+    )
+    with pytest.raises(ValueError, match="backup path changed after digest verification"):
+        verify_backup(backup, digest)
