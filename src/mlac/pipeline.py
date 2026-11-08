@@ -13,6 +13,7 @@ from mlac.governance import GovernancePolicy
 from mlac.attestation import canonical_json, directory_digests, verify_worker_result
 from mlac.artifact_registry import ArtifactRegistry
 from mlac.runtime_identity import RuntimeIdentityVerifier
+from mlac.dataset_manifest import verify_signed_dataset_manifest
 
 class SandboxRunner(Protocol):
     def run(self, *, candidate_dir: str | Path, command: list[str],
@@ -34,6 +35,7 @@ class PipelineResult:
     attestation: dict[str, Any] | None = None
     artifacts: tuple[dict[str, Any], ...] = ()
     runtime_identity: dict[str, Any] | None = None
+    dataset_provenance: dict[str, Any] | None = None
 
     @property
     def status(self) -> str:
@@ -55,6 +57,7 @@ class PipelineResult:
             "attestation": self.attestation,
             "artifacts": list(self.artifacts),
             "runtime_identity": self.runtime_identity,
+            "dataset_provenance": self.dataset_provenance,
         }
 
 def _benchmark(value: Any, label: str) -> BenchmarkResult:
@@ -131,7 +134,9 @@ class CandidateEvaluationPipeline:
                  governance: GovernancePolicy|None=None, evaluation_policy: EvaluationPolicy|None=None,
                  worker_entrypoint: str="/opt/mlac-worker/evaluate", max_report_bytes: int=1024*1024,
                  runtime_identity_verifier: RuntimeIdentityVerifier | None = None,
-                 require_runtime_identity: bool = False, remote_artifact_store: Any | None = None):
+                 require_runtime_identity: bool = False, remote_artifact_store: Any | None = None,
+                 trusted_dataset_signers: dict[str, bytes | str] | None = None,
+                 dataset_manifest_filename: str = "dataset-manifest.json"):
         if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image):
             raise ValueError("pipeline image must be pinned by an immutable sha256 digest")
         if getattr(runner, "image", image) != image:
@@ -140,9 +145,16 @@ class CandidateEvaluationPipeline:
             raise ValueError("worker_entrypoint must be an absolute trusted image path")
         if max_report_bytes < 1: raise ValueError("max_report_bytes must be positive")
         if not trusted_worker_keys: raise ValueError("at least one trusted worker public key is required")
+        if not trusted_dataset_signers: raise ValueError("at least one trusted dataset manifest signer is required")
+        if (not isinstance(dataset_manifest_filename, str) or not dataset_manifest_filename
+                or Path(dataset_manifest_filename).name != dataset_manifest_filename
+                or dataset_manifest_filename in {".", ".."}):
+            raise ValueError("dataset_manifest_filename must be a plain filename")
         if not isinstance(worker_id, str) or not worker_id.strip(): raise ValueError("worker_id must be non-empty")
         self.runner,self.image,self.store=runner,image,store
         self.trusted_worker_keys=dict(trusted_worker_keys)
+        self.trusted_dataset_signers=dict(trusted_dataset_signers)
+        self.dataset_manifest_filename=dataset_manifest_filename
         self.worker_identity_dir=Path(worker_identity_dir).expanduser().resolve(strict=True)
         if not self.worker_identity_dir.is_dir(): raise ValueError("worker_identity_dir must be an existing directory")
         private_key=self.worker_identity_dir / "worker_ed25519_private.pem"
@@ -172,6 +184,15 @@ class CandidateEvaluationPipeline:
             for right in mounts[index+1:]:
                 if left==right or left in right.parents or right in left.parents:
                     raise ValueError("candidate, trusted evaluation, and worker identity directories must be distinct and non-overlapping")
+        manifest_path=trusted_path / self.dataset_manifest_filename
+        if manifest_path.is_symlink() or not manifest_path.is_file():
+            raise PermissionError("a signed dataset-manifest.json is required in the trusted evaluation directory")
+        try:
+            dataset_envelope=json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError,json.JSONDecodeError) as exc:
+            raise ValueError("signed dataset manifest is not valid UTF-8 JSON") from exc
+        dataset_provenance=verify_signed_dataset_manifest(
+            dataset_envelope,trusted_path,trusted_signers=self.trusted_dataset_signers)
         before_digests = directory_digests(candidate_path, trusted_path)
         execution=self.runner.run(candidate_dir=candidate_path,trusted_dir=trusted_path,
             identity_dir=identity_path,command=[
@@ -236,6 +257,6 @@ class CandidateEvaluationPipeline:
                     "object_lock_mode":remote.object_lock_mode}
             artifact_records.append(record)
         result=replace(result,attestation=verified,artifacts=tuple(artifact_records),
-            runtime_identity=runtime_identity)
+            runtime_identity=runtime_identity,dataset_provenance=dataset_provenance)
         ledger=self.store.record(result,model_id=model_id,candidate_id=candidate_id)
         return replace(result,ledger_record=ledger)
