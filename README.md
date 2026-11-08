@@ -42,11 +42,13 @@ Resolve its immutable image digest and configure that digest in DockerSandboxRun
     from pathlib import Path
     from mlac.experiments import ExperimentStore
     from mlac.artifact_registry import ArtifactRegistry
+    from mlac.attestation import key_id_for_public_key
+    from cryptography.hazmat.primitives import serialization
 
     image = "registry.example/mlac-worker@sha256:<64-hex-digest>"
     worker_identity_dir = Path("./worker-identity")
     trusted_public_key = Path("./trusted-workers/worker-ed25519-public.pem").read_bytes()
-    key_id = "<public-key-sha256-fingerprint>"
+    key_id = key_id_for_public_key(serialization.load_pem_public_key(trusted_public_key))
     pipeline = CandidateEvaluationPipeline(
         runner=DockerSandboxRunner(image=image),
         image=image,
