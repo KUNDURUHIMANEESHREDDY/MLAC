@@ -70,7 +70,7 @@ class PostgresStateStore:
         except (TypeError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"stored {field} JSON is invalid") from exc
         if not isinstance(decoded, dict):
-            raise RuntimeError(f"stored {field} must be a JSON object")
+            raise TypeError(f"stored {field} must be a JSON object")
         return decoded
 
     def _initialize(self) -> None:
@@ -161,7 +161,7 @@ class PostgresStateStore:
         metadata = dict(record.metadata or {})
         owner = metadata.get("owner", "")
         if not isinstance(owner, str):
-            raise ValueError("model owner must be a string")
+            raise TypeError("model owner must be a string")
         with self._connect() as connection:
             connection.execute(
                 """

@@ -1,5 +1,6 @@
 """Tests for durable, owner-scoped API metadata storage."""
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -127,3 +128,15 @@ def test_store_proposal_listing_applies_owner_and_model_id_filters(tmp_path):
     )] == [alice_proposal.proposal_id]
     assert controller.list_proposals(owner="alice", model_ids=set()) == []
     assert controller.list_proposals(owner="alice", model_ids={bob.model_id}) == []
+
+
+
+def test_json_object_rejects_non_object_json() -> None:
+    with pytest.raises(TypeError, match="must be a JSON object"):
+        SQLiteStateStore._json_object("[]", field="model metadata")
+
+
+def test_insert_model_rejects_non_string_owner(tmp_path) -> None:
+    store = SQLiteStateStore(tmp_path / "state.sqlite3")
+    with pytest.raises(TypeError, match="model owner must be a string"):
+        store.insert_model(SimpleNamespace(metadata={"owner": 42}))
