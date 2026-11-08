@@ -68,6 +68,153 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Verify signed language-model worker report
+        env:
+          IMAGE: ghcr.io/kunduruhimaneeshreddy/mlac-worker
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          IMAGE_REF="$IMAGE@$DIGEST"
+          docker pull "$IMAGE_REF"
+          ROOT="$(mktemp -d)"
+          trap 'rm -rf "$ROOT"' EXIT
+          mkdir -p "$ROOT/candidate" "$ROOT/trusted" "$ROOT/identity" "$ROOT/output"
+          chmod 0777 "$ROOT/candidate" "$ROOT/trusted" "$ROOT/identity" "$ROOT/output"
+
+          # Create a tiny deterministic GPT-2 fixture and local WordLevel tokenizer.
+          # This is a worker/signature integration test, not a substitute for the
+          # operator's real model checkpoints or trusted evaluation corpus.
+          docker run --rm --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=128 --memory=2g --cpus=2 \
+            --user 65532:65532 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            -e HOME=/tmp -v "$ROOT/candidate:/workspace" \
+            -v "$ROOT/trusted:/trusted" -v "$ROOT/identity:/identity" \
+            --entrypoint python "$IMAGE_REF" - <<'PY'
+          import json, shutil, torch
+          from pathlib import Path
+          from tokenizers import Tokenizer
+          from tokenizers.models import WordLevel
+          from tokenizers.pre_tokenizers import Whitespace
+          from tokenizers.processors import TemplateProcessing
+          from transformers import GPT2Config, GPT2LMHeadModel, PreTrainedTokenizerFast
+          from mlac.attestation import generate_worker_keypair
+
+          torch.manual_seed(2026)
+          vocab = {
+              "<pad>": 0, "<bos>": 1, "<eos>": 2, "<unk>": 3,
+              "alpha": 4, "beta": 5, "gamma": 6, "delta": 7,
+              "because": 8, "therefore": 9, "red": 10, "blue": 11,
+          }
+          backend = Tokenizer(WordLevel(vocab, unk_token="<unk>"))
+          backend.pre_tokenizer = Whitespace()
+          backend.post_processor = TemplateProcessing(
+              single="<bos> $A <eos>",
+              pair="<bos> $A <eos> $B:1 <eos>:1",
+              special_tokens=[("<bos>", 1), ("<eos>", 2)],
+          )
+          tokenizer = PreTrainedTokenizerFast(
+              tokenizer_object=backend, bos_token="<bos>", eos_token="<eos>",
+              unk_token="<unk>", pad_token="<pad>",
+          )
+          tokenizer.save_pretrained("/trusted")
+
+          config = GPT2Config(
+              vocab_size=len(vocab), n_positions=32, n_ctx=32, n_embd=16,
+              n_layer=1, n_head=2, bos_token_id=1, eos_token_id=2, pad_token_id=0,
+          )
+          baseline = GPT2LMHeadModel(config).eval()
+          Path("/tmp/base").mkdir()
+          baseline.save_pretrained("/tmp/base", safe_serialization=True)
+          shutil.copyfile("/tmp/base/model.safetensors", "/trusted/baseline.safetensors")
+
+          candidate = GPT2LMHeadModel(config).eval()
+          candidate.load_state_dict(baseline.state_dict())
+          with torch.no_grad():
+              candidate.transformer.wte.weight[4].add_(0.02)
+          Path("/tmp/candidate").mkdir()
+          candidate.save_pretrained("/tmp/candidate", safe_serialization=True)
+          shutil.copyfile("/tmp/candidate/model.safetensors", "/workspace/candidate.pt")
+
+          records = [
+              {"text": "alpha beta gamma alpha beta"},
+              {"text": "delta alpha beta gamma delta"},
+              {"question": "alpha", "choices": ["beta", "gamma"], "answer_index": 0},
+          ]
+          Path("/trusted/evaluation.jsonl").write_text(
+              "".join(json.dumps(item) + "\\n" for item in records), encoding="utf-8"
+          )
+          manifest = {
+              "schema_version": 2, "model_type": "gpt2",
+              "model_config": {
+                  "vocab_size": len(vocab), "n_positions": 32, "n_ctx": 32,
+                  "n_embd": 16, "n_layer": 1, "n_head": 2,
+                  "bos_token_id": 1, "eos_token_id": 2, "pad_token_id": 0,
+              },
+              "baseline_state_dict": "baseline.safetensors",
+              "dataset": "evaluation.jsonl", "max_sequence_length": 32,
+              "iterations": 2, "warmup": 0,
+          }
+          Path("/trusted/manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+          generate_worker_keypair(
+              "/identity/worker_ed25519_private.pem",
+              "/trusted/worker_ed25519_public.pem",
+          )
+          PY
+
+          docker run --rm --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=128 --memory=2g --cpus=2 \
+            --user 65532:65532 --tmpfs /tmp:rw,nosuid,nodev,size=128m \
+            -e HOME=/tmp -v "$ROOT/candidate:/workspace:ro" \
+            -v "$ROOT/trusted:/trusted:ro" -v "$ROOT/identity:/identity:ro" \
+            -v "$ROOT/output:/output:rw" "$IMAGE_REF" \
+            /opt/mlac-worker/evaluate-lm --candidate /workspace/candidate.pt \
+            --trusted /trusted --report /output/report.json \
+            --identity-key /identity/worker_ed25519_private.pem \
+            --worker-id ci-smoke-worker --worker-image "$IMAGE_REF"
+
+          # Verify the Ed25519 signature, report digest, exact input digests,
+          # worker identity, and immutable image reference independently.
+          docker run --rm --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=64 --memory=1g --cpus=1 \
+            --user 65532:65532 --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+            -e HOME=/tmp -v "$ROOT/candidate:/workspace:ro" \
+            -v "$ROOT/trusted:/trusted:ro" -v "$ROOT/output:/output:ro" \
+            --entrypoint python "$IMAGE_REF" - "$IMAGE_REF" <<'PY'
+          import json, sys
+          from pathlib import Path
+          from mlac.attestation import canonical_json, directory_digests, verify_worker_result
+
+          image_ref = sys.argv[1]
+          envelope = json.loads(Path("/output/report.json").read_text(encoding="utf-8"))
+          assert set(envelope) == {"schema_version", "report", "attestation"}
+          assert envelope["schema_version"] == 1
+          report = envelope["report"]
+          assert report["schema_version"] == 1
+          assert "perplexity" in report["quality_baseline"]
+          assert "perplexity" in report["quality_candidate"]
+          assert "reasoning_accuracy" in report["quality_baseline"]
+          assert "reasoning_accuracy" in report["quality_candidate"]
+          attestation = envelope["attestation"]
+          public_key = Path("/trusted/worker_ed25519_public.pem").read_bytes()
+          verified = verify_worker_result(
+              attestation=attestation,
+              report_bytes=canonical_json(report),
+              artifact_sha256=directory_digests("/workspace", "/trusted"),
+              trusted_worker_keys={attestation["key_id"]: public_key},
+              expected_image=image_ref,
+              expected_worker_id="ci-smoke-worker",
+          )
+          print(json.dumps({
+              "signature_verified": True,
+              "worker_id": verified["worker_id"],
+              "worker_image": verified["worker_image"],
+              "perplexity_baseline": report["quality_baseline"]["perplexity"],
+              "perplexity_candidate": report["quality_candidate"]["perplexity"],
+              "reasoning_accuracy_baseline": report["quality_baseline"]["reasoning_accuracy"],
+              "reasoning_accuracy_candidate": report["quality_candidate"]["reasoning_accuracy"],
+          }, sort_keys=True))
+          PY
+
       - name: Verify image digest and publish deployment reference
         env:
           IMAGE: ghcr.io/kunduruhimaneeshreddy/mlac-worker
@@ -82,13 +229,14 @@ jobs:
           {
             echo "## MLAC language-model worker"
             echo
-            echo "Build commit: `$GITHUB_SHA`"
+            echo "Build commit: $GITHUB_SHA"
             echo
             echo "Immutable image reference:"
             echo
-            echo "`$IMAGE@$DIGEST`"
+            echo "$IMAGE@$DIGEST"
             echo
             echo "Configure CandidateEvaluationPipeline with this exact reference; do not use the latest or sha tag."
             echo
-            echo "SBOM and provenance attestations were requested from BuildKit."
+            echo "Signed-report smoke test passed with a deterministic synthetic fixture."
+            echo "This does not replace evaluation on the operator's actual model and dataset."
           } >> "$GITHUB_STEP_SUMMARY"
