@@ -12,6 +12,7 @@ from mlac.experiments import ExperimentStore
 from mlac.governance import GovernancePolicy
 from mlac.attestation import canonical_json, directory_digests, verify_worker_result
 from mlac.artifact_registry import ArtifactRegistry
+from mlac.runtime_identity import RuntimeIdentityVerifier
 
 class SandboxRunner(Protocol):
     def run(self, *, candidate_dir: str | Path, command: list[str],
@@ -32,6 +33,7 @@ class PipelineResult:
     ledger_record: dict[str, Any] | None = None
     attestation: dict[str, Any] | None = None
     artifacts: tuple[dict[str, Any], ...] = ()
+    runtime_identity: dict[str, Any] | None = None
 
     @property
     def status(self) -> str:
@@ -52,6 +54,7 @@ class PipelineResult:
                         "image": self.sandbox_image},
             "attestation": self.attestation,
             "artifacts": list(self.artifacts),
+            "runtime_identity": self.runtime_identity,
         }
 
 def _benchmark(value: Any, label: str) -> BenchmarkResult:
@@ -126,7 +129,9 @@ class CandidateEvaluationPipeline:
                  trusted_worker_keys: dict[str, bytes | str], worker_identity_dir: str | Path,
                  worker_id: str = "mlac-evaluator", artifact_registry: ArtifactRegistry | None = None,
                  governance: GovernancePolicy|None=None, evaluation_policy: EvaluationPolicy|None=None,
-                 worker_entrypoint: str="/opt/mlac-worker/evaluate", max_report_bytes: int=1024*1024):
+                 worker_entrypoint: str="/opt/mlac-worker/evaluate", max_report_bytes: int=1024*1024,
+                 runtime_identity_verifier: RuntimeIdentityVerifier | None = None,
+                 require_runtime_identity: bool = False, remote_artifact_store: Any | None = None):
         if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image):
             raise ValueError("pipeline image must be pinned by an immutable sha256 digest")
         if getattr(runner, "image", image) != image:
@@ -143,6 +148,11 @@ class CandidateEvaluationPipeline:
         private_key=self.worker_identity_dir / "worker_ed25519_private.pem"
         if not private_key.is_file() or private_key.is_symlink():
             raise ValueError("worker_identity_dir must contain a regular worker_ed25519_private.pem")
+        if require_runtime_identity and runtime_identity_verifier is None:
+            raise ValueError("runtime_identity_verifier is required when runtime identity is mandatory")
+        self.runtime_identity_verifier=runtime_identity_verifier
+        self.require_runtime_identity=require_runtime_identity
+        self.remote_artifact_store=remote_artifact_store
         self.worker_id=worker_id
         self.artifact_registry=artifact_registry or ArtifactRegistry()
         self.governance=governance or GovernancePolicy()
@@ -170,6 +180,13 @@ class CandidateEvaluationPipeline:
             "--identity-key","/identity/worker_ed25519_private.pem",
             "--worker-id",self.worker_id,"--worker-image",self.image])
         if execution.timed_out: raise RuntimeError("Candidate worker exceeded its wall-clock limit")
+        runtime_identity = None
+        if self.require_runtime_identity:
+            evidence = getattr(execution, "runtime_identity_evidence", None)
+            if not isinstance(evidence, dict):
+                raise PermissionError("independent runtime identity evidence is required but was not supplied")
+            runtime_identity = self.runtime_identity_verifier.verify(
+                evidence, expected_worker_id=self.worker_id, expected_image_digest=self.image)
         if execution.exit_code != 0:
             raise RuntimeError(f"Candidate worker failed with exit code {execution.exit_code}: {execution.stderr[:2000]}")
         report_bytes=execution.output_files.get("report.json")
@@ -209,7 +226,16 @@ class CandidateEvaluationPipeline:
                 artifact_bytes[f"{role}/{path.name}"]=path.read_bytes()
         linked=self.artifact_registry.link_evaluation(evaluation_id=evaluation.evaluation_id,
             model_id=model_id,candidate_id=candidate_id,artifacts=artifact_bytes)
-        result=replace(result,attestation=verified,artifacts=tuple(
-            {k:v for k,v in item.items() if k!="object_path"} for item in linked))
+        artifact_records=[]
+        for item in linked:
+            record={k:v for k,v in item.items() if k!="object_path"}
+            if self.remote_artifact_store is not None:
+                remote=self.remote_artifact_store.put_bytes(artifact_bytes[item["role"]])
+                record["remote"]={"bucket":remote.bucket,"key":remote.key,"version_id":remote.version_id,
+                    "sha256":remote.sha256,"retention_until":remote.retention_until,
+                    "object_lock_mode":remote.object_lock_mode}
+            artifact_records.append(record)
+        result=replace(result,attestation=verified,artifacts=tuple(artifact_records),
+            runtime_identity=runtime_identity)
         ledger=self.store.record(result,model_id=model_id,candidate_id=candidate_id)
         return replace(result,ledger_record=ledger)
