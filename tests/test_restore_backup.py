@@ -119,6 +119,41 @@ def test_restore_closes_source_if_destination_connection_fails(
     assert not destination.exists()
 
 
+def test_restore_uses_the_verified_snapshot_if_original_backup_changes(
+    tmp_path: Path,
+) -> None:
+    backup = tmp_path / "backup.sqlite3"
+    digest = _backup(backup)
+    destination = tmp_path / "restored.sqlite3"
+    real_verify = __import__("scripts.restore_backup", fromlist=["verify_backup"]).verify_backup
+    snapshot_paths: list[Path] = []
+
+    def verify_snapshot_then_mutate_original(snapshot_path: Path, expected_sha256: str):
+        snapshot = Path(snapshot_path)
+        snapshot_paths.append(snapshot)
+        assert snapshot != backup
+        result = real_verify(snapshot, expected_sha256)
+
+        replacement = tmp_path / "replacement.sqlite3"
+        _backup(replacement)
+        with sqlite3.connect(replacement) as connection:
+            connection.execute("UPDATE state SET value = ?", ("tampered-after-verification",))
+        backup.write_bytes(replacement.read_bytes())
+        return result
+
+    with patch(
+        "scripts.restore_backup.verify_backup",
+        side_effect=verify_snapshot_then_mutate_original,
+    ):
+        restore_sqlite_backup(backup, destination, digest)
+
+    with sqlite3.connect(destination) as restored:
+        assert restored.execute("SELECT value FROM state").fetchone() == ("preserved",)
+
+    assert len(snapshot_paths) == 1
+    assert not snapshot_paths[0].exists()
+
+
 def test_restore_syncs_file_and_parent_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
