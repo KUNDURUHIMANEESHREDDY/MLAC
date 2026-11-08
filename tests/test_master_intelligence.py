@@ -188,3 +188,72 @@ def test_structural_modification_proposals_reject_invalid_values():
             ).plan(
                 model_id="m", architecture=sample_architecture(), objective="reduce latency"
             )
+
+
+def test_weight_engine_proposals_are_ranked_and_bounded():
+    def provider(**kwargs):
+        return [
+            {
+                "operation": "prune_unstructured",
+                "parameters": {"target": "mlp.0.weight", "amount": 0.15},
+                "hypothesis": "Magnitude pruning may reduce effective weight density.",
+                "rationale": "The target is a supported transformer MLP projection.",
+                "expected_effect": {"memory": "sparsity increases", "quality": "measure"},
+                "falsification_criteria": ["Quality regresses beyond the allowed threshold"],
+                "risk": "medium", "estimated_value": 0.7, "feasibility": 0.9,
+            },
+            {
+                "operation": "fake_quantize_int8",
+                "parameters": {"target": "mlp.0.weight"},
+                "hypothesis": "Fake quantization may bound numerical error.",
+                "rationale": "The fixed worker can reconstruct this candidate.",
+                "expected_effect": {"quality": "measure", "memory": "estimate"},
+                "falsification_criteria": ["Quality regresses beyond the allowed threshold"],
+                "risk": "medium", "estimated_value": 0.65, "feasibility": 0.95,
+            },
+            {
+                "operation": "inject_lora",
+                "parameters": {"target": "attention.out_proj", "rank": 4, "alpha": 8, "dropout": 0.0},
+                "hypothesis": "A low-rank adapter provides a parameter-efficient adaptation path.",
+                "rationale": "The target is a supported linear projection.",
+                "expected_effect": {"quality": "requires adapter training"},
+                "falsification_criteria": ["Adapter training fails to improve held-out quality"],
+                "risk": "medium", "estimated_value": 0.6, "feasibility": 0.9,
+            },
+        ]
+
+    report = MasterIntelligenceEngine(
+        backend=CallableReasoningBackend(provider), max_plans=10
+    ).plan(
+        model_id="m", architecture=sample_architecture(), objective="reduce memory"
+    )
+    by_operation = {plan.operation: plan for plan in report.plans}
+    assert by_operation["prune_unstructured"].parameters == {
+        "target": "mlp.0.weight", "amount": 0.15,
+    }
+    assert by_operation["fake_quantize_int8"].parameters == {"target": "mlp.0.weight"}
+    assert by_operation["inject_lora"].parameters["rank"] == 4
+
+
+@pytest.mark.parametrize("operation,parameters", [
+    ("prune_unstructured", {"target": "os.system", "amount": 0.1}),
+    ("fake_quantize_int8", {"target": "mlp.0.weight", "unexpected": True}),
+    ("prune_structured", {"target": "mlp.0.weight", "dimension": [], "indices": [0]}),
+    ("inject_lora", {"target": "attention.out_proj", "rank": 1000}),
+])
+def test_weight_engine_proposals_reject_untrusted_targets_and_parameters(operation, parameters):
+    def provider(**kwargs):
+        return [{
+            "operation": operation,
+            "parameters": parameters,
+            "hypothesis": "Try a bounded weight operation.",
+            "rationale": "The local validator must enforce the target contract.",
+            "expected_effect": {"quality": "measure"},
+            "falsification_criteria": ["Validation rejects invalid values"],
+            "risk": "medium", "estimated_value": 0.5, "feasibility": 0.8,
+        }]
+
+    with pytest.raises((ValueError, TypeError)):
+        MasterIntelligenceEngine(backend=CallableReasoningBackend(provider)).plan(
+            model_id="m", architecture=sample_architecture(), objective="reduce memory"
+        )
