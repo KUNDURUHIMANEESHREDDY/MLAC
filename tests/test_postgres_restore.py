@@ -137,10 +137,27 @@ def postgres_archive_and_target(tmp_path: Path):
 
 def test_postgres_backup_restores_into_empty_disposable_database(
     postgres_archive_and_target,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backup, digest, target_url, target_name = postgres_archive_and_target
     psycopg = pytest.importorskip("psycopg")
+    target = parse_postgres_target(target_url)
+    real_run = subprocess.run
 
+    def capture_restore_error(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        command = args[0]
+        if (
+            result.returncode != 0
+            and isinstance(command, list)
+            and command
+            and Path(command[0]).name == "pg_restore"
+        ):
+            diagnostic = (result.stderr or "").replace(target.password, "[redacted]")
+            print(f"synthetic PostgreSQL restore diagnostic: {diagnostic[:1000]}")
+        return result
+
+    monkeypatch.setattr(restore_module.subprocess, "run", capture_restore_error)
     result = restore_postgres_backup(backup, target_url, digest)
 
     assert result["format"] == "postgres-custom"
