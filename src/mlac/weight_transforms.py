@@ -89,6 +89,27 @@ def _execute(
     raise ValueError(f"unsupported weight transformation operation: {operation!r}")
 
 
+def _validate_parameter_shape(name: str, value: Tensor, architecture: Architecture,
+                             mappings: Mapping[str, Any], tensor_specs: Mapping[str, Any]) -> None:
+    mapping = mappings.get(name)
+    if mapping is None:
+        raise ValueError(f"parameter {name!r} has no IR mapping")
+    spec = tensor_specs.get(mapping.tensor_name)
+    if spec is None:
+        raise ValueError(f"parameter {name!r} references undeclared tensor {mapping.tensor_name!r}")
+    if len(spec.shape) != value.ndim:
+        raise ValueError(
+            f"parameter {name!r} rank {value.ndim} does not match declared rank {len(spec.shape)}"
+        )
+    for actual, expected in zip(value.shape, spec.shape):
+        if isinstance(expected, int) and actual != expected:
+            raise ValueError(
+                f"parameter {name!r} shape {tuple(value.shape)} does not match declared shape {spec.shape}"
+            )
+    if mapping.shape and tuple(mapping.shape) != tuple(value.shape):
+        raise ValueError(f"parameter {name!r} violates its parameter mapping shape contract")
+
+
 def apply_weight_transformations(
     architecture: Architecture,
     parameters: Mapping[str, Tensor],
@@ -113,6 +134,11 @@ def apply_weight_transformations(
             if strict:
                 raise KeyError(f"missing transformation sources: {', '.join(missing)}")
             continue
+        for source_name in requirement.source_parameters:
+            source = working[source_name]
+            if not isinstance(source, torch.Tensor):
+                raise TypeError(f"transformation source {source_name!r} is not a torch.Tensor")
+            _validate_parameter_shape(source_name, source, architecture, mappings, tensor_specs)
         outputs = _execute(requirement, working)
         if len(outputs) != len(requirement.target_parameters):
             raise ValueError(
@@ -120,23 +146,9 @@ def apply_weight_transformations(
                 f"{len(requirement.target_parameters)} targets"
             )
         for target_name, output in zip(requirement.target_parameters, outputs):
-            mapping = mappings.get(target_name)
-            if mapping is None:
-                raise ValueError(f"target parameter {target_name!r} has no IR mapping")
-            spec = tensor_specs.get(mapping.tensor_name)
-            if spec is None:
-                raise ValueError(f"target tensor {mapping.tensor_name!r} is not declared")
-            if len(spec.shape) != output.ndim:
-                raise ValueError(
-                    f"transformed parameter {target_name!r} rank {output.ndim} "
-                    f"does not match declared rank {len(spec.shape)}"
-                )
-            for actual, expected in zip(output.shape, spec.shape):
-                if isinstance(expected, int) and actual != expected:
-                    raise ValueError(
-                        f"transformed parameter {target_name!r} shape {tuple(output.shape)} "
-                        f"does not match declared shape {spec.shape}"
-                    )
+            if not isinstance(output, torch.Tensor):
+                raise TypeError(f"transformation target {target_name!r} is not a torch.Tensor")
+            _validate_parameter_shape(target_name, output, architecture, mappings, tensor_specs)
             working[target_name] = output.clone()
 
         records.append(TransformationRecord(
