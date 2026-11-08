@@ -265,31 +265,36 @@ class SQLiteStateStore:
         finally:
             connection.close()
 
-    def list_proposals(self, *, owner: str | None = None) -> list[dict[str, Any]]:
-        """Return proposals, optionally filtering by the owning model principal."""
+    def list_proposals(
+        self,
+        *,
+        owner: str | None = None,
+        model_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return proposals filtered by owner and/or an explicit model-ID set."""
+        if model_ids is not None and not model_ids:
+            return []
         connection = self._connect()
         try:
-            if owner is None:
-                rows = connection.execute(
-                    """
-                    SELECT p.proposal_id, p.model_id, p.hypothesis, p.operation,
-                           p.parameters_json, p.status, p.created_at
-                    FROM proposals AS p
-                    ORDER BY p.created_at, p.proposal_id
-                    """
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    """
-                    SELECT p.proposal_id, p.model_id, p.hypothesis, p.operation,
-                           p.parameters_json, p.status, p.created_at
-                    FROM proposals AS p
-                    JOIN models AS m ON m.model_id = p.model_id
-                    WHERE m.owner = ?
-                    ORDER BY p.created_at, p.proposal_id
-                    """,
-                    (owner,),
-                ).fetchall()
+            clauses: list[str] = []
+            parameters: list[str] = []
+            query = """
+                SELECT p.proposal_id, p.model_id, p.hypothesis, p.operation,
+                       p.parameters_json, p.status, p.created_at
+                FROM proposals AS p
+                JOIN models AS m ON m.model_id = p.model_id
+            """
+            if owner is not None:
+                clauses.append("m.owner = ?")
+                parameters.append(owner)
+            if model_ids is not None:
+                ordered_ids = sorted(model_ids)
+                clauses.append("p.model_id IN (" + ",".join("?" for _ in ordered_ids) + ")")
+                parameters.extend(ordered_ids)
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY p.created_at, p.proposal_id"
+            rows = connection.execute(query, parameters).fetchall()
             return [
                 {
                     "proposal_id": row["proposal_id"],
