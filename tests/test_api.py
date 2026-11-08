@@ -71,6 +71,8 @@ def test_health_is_liveness_and_non_health_routes_require_bearer():
     client, _ = make_client()
     assert client.get("/health").status_code == 200
     assert client.get("/ready").json()["scope"] == "localhost-development"
+    assert client.get("/docs").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
     response = client.get("/models")
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
