@@ -78,17 +78,23 @@ and omit the teacher.
 
 ## Candidate evaluation and promotion boundary
 
-Training completion is not promotion. The selected checkpoint and training
-summary are evidence inputs to a separate candidate-evaluation workflow.
-Promotion requires an operator-configured candidate bundle adapter and the
-existing `CandidateEvaluationPipeline`: immutable worker image, signed worker
-report, controller-side input digest verification, held-out quality/performance
-policy, candidate-only governance, artifact registration, and experiment
-ledger. The worker's existing TransformerBlock regression evaluator does not
-natively evaluate arbitrary classification models; do not pass a generic
-training checkpoint to it. A model-family-specific fixed evaluator and
-candidate reconstruction contract must be registered before that family can
-be promoted through the pipeline.
+Training completion is not promotion. `TrainingPromotionWorkflow`
+provides the submission bridge to the existing `CandidateEvaluationPipeline`.
+A trusted, model-family-specific `TrainingCandidateBuilder` must write exactly
+`candidate.pt` and `candidate_manifest.json` in the worker's fixed bundle
+format. The bridge adds `training-evidence.json` (training configuration
+outcomes, checkpoint digest, dataset digest, selected epoch and metrics) to
+the candidate directory, so it is covered by the pipeline's input digest,
+worker signature, and artifact registration. The pipeline then performs the
+worker evaluation, controller-side digest verification, held-out
+quality/performance policy, candidate-only governance, and experiment ledger
+write.
+
+The worker's existing TransformerBlock regression evaluator does not natively
+evaluate arbitrary classification models; do not pass a generic classifier
+checkpoint to it. A model-family-specific fixed evaluator and candidate
+reconstruction contract must be registered before that family can be promoted.
+The bridge does not bypass the worker or authorize production deployment.
 
 No model is deployed or production-mutated by the Training Engine. External
 approval and recovery controls remain outside the self-modifying system.
