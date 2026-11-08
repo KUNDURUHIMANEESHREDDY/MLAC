@@ -170,6 +170,12 @@ class WeightTransformationRequirement:
             raise ValueError("weight transformation operation must be non-empty")
         if not self.source_parameters or not self.target_parameters:
             raise ValueError("weight transformations require source and target parameters")
+        if any(not name.strip() for name in (*self.source_parameters, *self.target_parameters)):
+            raise ValueError("weight transformation parameter names must be non-empty")
+        if len(set(self.source_parameters)) != len(self.source_parameters):
+            raise ValueError("weight transformation source parameters must be unique")
+        if len(set(self.target_parameters)) != len(self.target_parameters):
+            raise ValueError("weight transformation target parameters must be unique")
 
 
 @dataclass(frozen=True)
