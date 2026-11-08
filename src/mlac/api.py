@@ -430,10 +430,10 @@ def create_app(
         owned_model_ids = {
             record.model_id for record in model_store.list(owner=principal)
         }
-        return [
-            proposal for proposal in proposal_controller.list_proposals()
-            if proposal.get("model_id") in owned_model_ids
-        ]
+        return proposal_controller.list_proposals(
+            owner=principal,
+            model_ids=owned_model_ids,
+        )
 
     @app.get("/intelligence/provider")
     def intelligence_provider(_principal: str = Depends(require_principal)):
