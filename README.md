@@ -2,20 +2,20 @@
 
 MLAC is an open-source research and engineering platform for inspecting machine-learning models, representing structure in a framework-neutral intermediate representation (MLAC-IR), and running governed architecture experiments.
 
-> **Status: Phase 5 engineering preview.** MLAC includes a supported PyTorch transformer target, candidate evaluation and scorecards, a safety kernel, and a Docker-backed isolated execution primitive. It does not autonomously train, promote, or deploy models.
+> **Status: Phase 6 engineering preview.** MLAC includes a supported PyTorch transformer target, candidate evaluation and scorecards, a safety kernel, a Docker-backed execution boundary, and a controller-owned sandbox/evaluation/governance workflow. It does not autonomously deploy models.
 
 ## Implemented
 
 - Framework-neutral architecture, component, and tensor representation.
 - In-memory model registry and read-only inspector for trusted, instantiated PyTorch modules.
-- Versioned dropout-configuration mutation on IR snapshots (not live model weights).
+- Versioned dropout-configuration mutation on IR snapshots.
 - Proposal-only evolution controller and default-deny production mutation policy.
 - Executable TransformerBlock with fused QKV attention and attention-head pruning with weight migration.
 - Local microbenchmark and baseline-versus-candidate evaluation with task-quality and performance gates.
 - SQLite-backed append-only experiment scorecard ledger.
 - Safety kernel with policy integrity checks, monotonic tightening, and externally signed production approvals.
-- Docker-backed candidate runner with no network, read-only candidate input, isolated output, dropped capabilities, non-root identity, and resource/time/output limits.
-- GitHub Actions test workflow.
+- Docker-backed candidate runner with no network, read-only candidate input, isolated output, dropped capabilities, non-root identity, and resource/time limits.
+- Controller-owned candidate pipeline: fixed trusted worker, validated report, evaluation gates, candidate-only governance, and persisted outcome.
 
 ## Quick start
 
@@ -25,45 +25,50 @@ MLAC is an open-source research and engineering platform for inspecting machine-
     pytest
     mlac version
 
-Optional API: pip install -e ".[api]" then mlac serve. API docs: http://127.0.0.1:8000/docs.
+Optional API: pip install -e ".[api]" then mlac serve. Keep the unauthenticated API on localhost.
 
-## Run an isolated candidate
+## Candidate evaluation workflow
 
-The runner requires Docker and a worker image pinned by immutable digest. It never falls back to in-process execution.
+The worker image must be trusted and pinned by immutable digest. Its fixed /opt/mlac-worker/evaluate executable evaluates baseline and candidate artifacts from the read-only bundle and writes /output/report.json using schema version 1.
 
-    from mlac.sandbox import DockerSandboxRunner, SandboxLimits
+    from mlac.pipeline import CandidateEvaluationPipeline
+    from mlac.sandbox import DockerSandboxRunner
+    from mlac.experiments import ExperimentStore
 
-    runner = DockerSandboxRunner(
-        image="registry.example/mlac-worker@sha256:<64-hex-digest>",
-        limits=SandboxLimits(timeout_seconds=90, memory="4g", cpus=2),
+    image = "registry.example/mlac-worker@sha256:<64-hex-digest>"
+    pipeline = CandidateEvaluationPipeline(
+        runner=DockerSandboxRunner(image=image),
+        image=image,
+        store=ExperimentStore("mlac-experiments.sqlite3"),
     )
-    result = runner.run(
+    result = pipeline.run(
         candidate_dir="./candidate-bundle",
-        command=["python", "-I", "/workspace/evaluate_candidate.py"],
+        model_id="baseline-model-id",
+        candidate_id="candidate-001",
     )
+    print(result.status, result.evaluation.evaluation_id)
 
-See docs/PHASE5.md before running untrusted workloads.
+The pipeline can authorize only a candidate operation. It does not deploy or promote to production. See docs/PHASE5.md and docs/PHASE6.md.
 
 ## Safety and limitations
 
-- Production mutations are disabled by default. Candidate evaluation is evidence, not deployment authorization.
-- Only trusted, already-instantiated PyTorch modules are inspected; no untrusted checkpoint loading.
-- Head pruning supports MLAC's own TransformerBlock, not arbitrary model graph surgery.
+- Production mutations are disabled by default and require external policy pinning plus scoped operator approval.
+- Evaluation evidence is not deployment authorization.
+- Candidate input is read-only; no controller, policy, recovery, credential, or home-directory mounts are provided.
+- Worker reports are trusted only to the extent that the reviewed, digest-pinned worker image and runtime are trusted.
+- Docker is not a complete defense against a compromised host, kernel, daemon, or runtime. Use a dedicated worker VM/host and stronger isolation for hostile code.
 - The optional API is unauthenticated; keep it on localhost.
-- The sandbox is a container execution boundary, not a complete defense against a compromised host, kernel, Docker daemon, or container runtime. Use a dedicated non-root worker VM/host and stronger isolation for hostile code.
-- Candidate code cannot write to its mounted input; no controller, policy, recovery, credential, or home-directory mounts are provided. Output is ephemeral and is not automatically promoted.
-- The trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
+- Trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
 
-See docs/ARCHITECTURE.md, docs/PHASE4.md, and docs/PHASE5.md.
+See docs/ARCHITECTURE.md, docs/PHASE4.md, docs/PHASE5.md, and docs/PHASE6.md.
 
 ## Roadmap
 
-1. Durable registry, artifact references, and audit log.
-2. More supported architecture transformations and weight migration.
-3. Reproducible dataset manifests, robust evaluation statistics, and external worker orchestration.
+1. Durable artifact store and immutable dataset manifests.
+2. Signed worker attestations and external worker orchestration.
+3. More supported architecture transformations and reproducible task evaluation.
 4. Provider-independent master intelligence and experiment planning.
 5. Recursive controller evaluation with immutable recovery and authorization boundaries.
-6. Production hardening and deployment.
 
 ## License
 
