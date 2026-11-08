@@ -65,12 +65,15 @@ def create_signed_dataset_manifest(
     splits: Mapping[str, list[str]],
     signer_id: str,
     private_key_pem: bytes | str,
+    dataset_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     """Build and sign a deterministic manifest over explicitly assigned split files."""
     if not all(isinstance(x, str) and x.strip() for x in (dataset_id, revision, signer_id)):
         raise ValueError("dataset_id, revision, and signer_id must be non-empty strings")
     if not isinstance(splits, Mapping) or not splits:
         raise ValueError("splits must be a non-empty mapping")
+    if dataset_fingerprint is not None and (not isinstance(dataset_fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", dataset_fingerprint)):
+        raise ValueError("dataset_fingerprint must be a lowercase SHA-256 digest")
     root = Path(dataset_root).expanduser().resolve(strict=True)
     if not root.is_dir():
         raise ValueError("dataset_root must be a directory")
@@ -102,6 +105,8 @@ def create_signed_dataset_manifest(
         "splits": normalized,
         "files": files,
     }
+    if dataset_fingerprint is not None:
+        manifest["dataset_fingerprint"] = dataset_fingerprint
     key = _load_private_key(private_key_pem)
     signature = base64.b64encode(key.sign(canonical_json(manifest))).decode("ascii")
     return {
@@ -129,12 +134,16 @@ def verify_signed_dataset_manifest(
     if envelope["schema_version"] != 1:
         raise ValueError("unsupported dataset manifest envelope version")
     manifest, signature = envelope["manifest"], envelope["signature"]
-    if not isinstance(manifest, dict) or set(manifest) != {
-        "schema_version", "dataset_id", "revision", "created_at", "splits", "files"
-    }:
+    if not isinstance(manifest, dict) or set(manifest) not in (
+        {"schema_version", "dataset_id", "revision", "created_at", "splits", "files"},
+        {"schema_version", "dataset_id", "revision", "created_at", "splits", "files", "dataset_fingerprint"},
+    ):
         raise ValueError("dataset manifest schema is invalid")
     if manifest["schema_version"] != 1:
         raise ValueError("unsupported dataset manifest version")
+    if "dataset_fingerprint" in manifest and (not isinstance(manifest["dataset_fingerprint"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", manifest["dataset_fingerprint"])):
+        raise ValueError("dataset manifest fingerprint must be a lowercase SHA-256 digest")
     if not isinstance(signature, dict) or set(signature) != {
         "algorithm", "signer_id", "public_key_sha256", "value"
     } or signature["algorithm"] != "Ed25519":
@@ -193,6 +202,7 @@ def verify_signed_dataset_manifest(
     return {
         "dataset_id": manifest["dataset_id"],
         "revision": manifest["revision"],
+        "dataset_fingerprint": manifest.get("dataset_fingerprint"),
         "signer_id": signer_id,
         "manifest_sha256": hashlib.sha256(canonical_json(manifest)).hexdigest(),
         "verified_files": verified,
