@@ -126,7 +126,7 @@ def main() -> None:
         digest = digest_hash.hexdigest()
 
         created = datetime.now(timezone.utc)
-        retain_until = created + timedelta(days=retention_days)
+        retain_until = (created + timedelta(days=retention_days)).replace(microsecond=0)
         key = (
             f"mlac/api-state/{created:%Y/%m/%d}/"
             f"api-state-{created:%Y%m%dT%H%M%SZ}-{digest[:16]}{suffix}"
