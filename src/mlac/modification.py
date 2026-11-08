@@ -34,6 +34,12 @@ class Modification:
     operation: str
     config: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.operation, str) or not self.operation.strip():
+            raise ValueError("modification operation must be a non-empty string")
+        if not isinstance(self.config, Mapping):
+            raise TypeError("modification config must be a mapping")
+
 
 @dataclass(frozen=True)
 class ModificationPlan:
@@ -43,10 +49,12 @@ class ModificationPlan:
     name: str = "architecture-modification"
 
     def __post_init__(self) -> None:
-        if not self.name.strip():
+        if not isinstance(self.name, str) or not self.name.strip():
             raise ValueError("modification plan name must be non-empty")
-        if not self.operations:
-            raise ValueError("modification plan must contain at least one operation")
+        if not isinstance(self.operations, tuple) or not self.operations:
+            raise ValueError("modification plan operations must be a non-empty tuple")
+        if any(not isinstance(item, Modification) for item in self.operations):
+            raise TypeError("modification plan operations must be Modification instances")
 
 
 @dataclass(frozen=True)
@@ -88,12 +96,21 @@ class MixtureOfExperts(nn.Module):
         expert_noise_std: float = 1e-3,
     ) -> None:
         super().__init__()
-        if d_model < 1 or num_experts < 2:
-            raise ValueError("d_model must be positive and num_experts must be at least 2")
-        if not 1 <= top_k <= num_experts:
+        if type(d_model) is not int or d_model < 1:
+            raise ValueError("d_model must be a positive integer")
+        if type(num_experts) is not int or num_experts < 2:
+            raise ValueError("num_experts must be an integer of at least 2")
+        if type(top_k) is not int or not 1 <= top_k <= num_experts:
             raise ValueError("top_k must be between 1 and num_experts")
-        if not isinstance(expert_noise_std, (int, float)) or not torch.isfinite(torch.tensor(float(expert_noise_std))) or expert_noise_std < 0:
+        if (
+            isinstance(expert_noise_std, bool)
+            or not isinstance(expert_noise_std, (int, float))
+            or not bool(torch.isfinite(torch.tensor(float(expert_noise_std))))
+            or expert_noise_std < 0
+        ):
             raise ValueError("expert_noise_std must be a finite non-negative number")
+        if not isinstance(expert, nn.Module):
+            raise TypeError("expert must be a torch.nn.Module")
         self.d_model = int(d_model)
         self.num_experts = int(num_experts)
         self.top_k = int(top_k)
@@ -228,16 +245,18 @@ def _resize_attention_heads(block: TransformerBlock, num_heads: int) -> dict[str
 
 
 def _add_transformer_block(module: nn.Sequential, config: Mapping[str, Any]) -> dict[str, Any]:
-    index = int(config.get("index", len(module)))
-    if not 0 <= index <= len(module):
+    index = config.get("index", len(module))
+    if type(index) is not int or not 0 <= index <= len(module):
         raise ValueError("insert index is outside the layer stack")
     if any(not isinstance(layer, TransformerBlock) for layer in module):
         raise TypeError("add_transformer_block requires a Sequential of TransformerBlock layers")
     reference = module[0] if len(module) else None
-    d_model = int(config.get("d_model", reference.d_model if reference else 0))
-    num_heads = int(config.get("num_heads", reference.attention.num_heads if reference else 0))
-    mlp_ratio = int(config.get("mlp_ratio", reference.mlp_ratio if reference else 4))
-    if d_model < 1 or num_heads < 1:
+    d_model = config.get("d_model", reference.d_model if reference else 0)
+    num_heads = config.get("num_heads", reference.attention.num_heads if reference else 0)
+    mlp_ratio = config.get("mlp_ratio", reference.mlp_ratio if reference else 4)
+    if any(type(value) is not int for value in (d_model, num_heads, mlp_ratio)):
+        raise ValueError("d_model, num_heads, and mlp_ratio must be integers")
+    if d_model < 1 or num_heads < 1 or mlp_ratio < 1:
         raise ValueError("d_model and num_heads are required for an empty layer stack")
     if any(layer.d_model != d_model for layer in module):
         raise ValueError("all transformer blocks in a stack must share d_model")
@@ -258,9 +277,9 @@ def _add_transformer_block(module: nn.Sequential, config: Mapping[str, Any]) -> 
 
 
 def _remove_layer(module: nn.Sequential, config: Mapping[str, Any]) -> dict[str, Any]:
-    index = int(config["index"])
+    index = config["index"]
     layers = list(module.children())
-    if not 0 <= index < len(layers):
+    if type(index) is not int or not 0 <= index < len(layers):
         raise ValueError("remove index is outside the layer stack")
     if len(layers) == 1:
         raise ValueError("cannot remove the only layer from a Sequential")
@@ -315,9 +334,9 @@ def _apply_one(module: nn.Module, item: Modification) -> dict[str, Any]:
             raise TypeError("convert_mlp_to_moe requires a TransformerBlock root")
         if isinstance(module.mlp, MixtureOfExperts):
             raise ValueError("MLP is already a MixtureOfExperts module")
-        experts = int(config["num_experts"])
-        top_k = int(config.get("top_k", min(2, experts)))
-        noise = float(config.get("expert_noise_std", 1e-3))
+        experts = config["num_experts"]
+        top_k = config.get("top_k", min(2, experts))
+        noise = config.get("expert_noise_std", 1e-3)
         parameter = next(module.mlp.parameters())
         moe = MixtureOfExperts(
             module.mlp, d_model=module.d_model, num_experts=experts,
@@ -338,11 +357,11 @@ def _apply_one(module: nn.Module, item: Modification) -> dict[str, Any]:
         if not isinstance(module, nn.Sequential):
             raise TypeError("add_linear_layer requires nn.Sequential root")
         layers = list(module.children())
-        index = int(config.get("index", len(layers)))
-        if not 0 <= index <= len(layers):
+        index = config.get("index", len(layers))
+        if type(index) is not int or not 0 <= index <= len(layers):
             raise ValueError("insert index is outside the layer stack")
-        in_features, out_features = int(config["in_features"]), int(config["out_features"])
-        if in_features < 1 or out_features < 1:
+        in_features, out_features = config["in_features"], config["out_features"]
+        if type(in_features) is not int or type(out_features) is not int or in_features < 1 or out_features < 1:
             raise ValueError("linear dimensions must be positive")
         previous, following = _linear_neighbors(layers, index)
         if previous is not None and previous.out_features != in_features:
