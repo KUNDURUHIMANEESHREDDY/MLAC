@@ -329,6 +329,12 @@ def compile_architecture(
         if incoming.get(node.node_id):
             raise ValueError(f"input node {node.node_id!r} cannot have incoming edges")
 
+    binary_operators = {"add", "multiply", "matmul"}
+    unary_operators = {
+        "identity", "linear", "relu", "gelu", "silu", "tanh", "sigmoid",
+        "softmax", "layer_norm", "dropout", "embedding", "flatten",
+        "reshape", "transpose", "permute",
+    }
     modules: list[nn.Module] = []
     compiled_nodes: list[GraphNode] = []
     module_index: dict[str, int] = {}
@@ -338,8 +344,15 @@ def compile_architecture(
         factory = factories.get(node.operation)
         if factory is None:
             raise ValueError(f"unregistered MLAC-IR operator: {node.operation!r}")
-        if not incoming.get(node.node_id):
+        input_count = len(incoming.get(node.node_id, ()))
+        if input_count == 0:
             raise ValueError(f"non-input node {node.node_id!r} has no incoming edges")
+        if node.operation in binary_operators and input_count != 2:
+            raise ValueError(f"operator {node.operation!r} requires exactly two inputs")
+        if node.operation == "concat" and input_count < 2:
+            raise ValueError("operator 'concat' requires at least two inputs")
+        if node.operation in unary_operators and input_count != 1:
+            raise ValueError(f"operator {node.operation!r} requires exactly one input")
         module = factory(node.attributes)
         if not isinstance(module, nn.Module):
             raise TypeError(f"operator factory {node.operation!r} did not return torch.nn.Module")
