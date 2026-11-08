@@ -17,14 +17,19 @@ AUDIENCE = "mlac-api"
 
 
 class StaticJWKClient:
+    """Return a fixed test public key without making network requests."""
+
     def __init__(self, public_key):
+        """Store the public key used to verify test tokens."""
         self.public_key = public_key
 
     def get_signing_key_from_jwt(self, token):
+        """Return the fixed public key for any test key identifier."""
         return SimpleNamespace(key=self.public_key)
 
 
 def make_client(*, rate_limit=60, pre_auth_rate_limit=120):
+    """Create an isolated API client and a helper for signed test tokens."""
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     app = create_app(
         model_registry=ModelRegistry(),
@@ -38,6 +43,7 @@ def make_client(*, rate_limit=60, pre_auth_rate_limit=120):
     client = TestClient(app)
 
     def token(subject, *, issuer=ISSUER, audience=AUDIENCE, headers=None):
+        """Sign a short-lived token for a named test principal."""
         now = int(time.time())
         token_headers = {"kid": "test-key"}
         token_headers.update(headers or {})
@@ -58,10 +64,12 @@ def make_client(*, rate_limit=60, pre_auth_rate_limit=120):
 
 
 def auth(token):
+    """Build the Authorization header for a bearer token."""
     return {"Authorization": f"Bearer {token}"}
 
 
 def architecture():
+    """Return a valid minimal architecture payload for API tests."""
     return {
         "name": "tiny",
         "family": "mlp",
@@ -70,6 +78,7 @@ def architecture():
 
 
 def test_health_is_liveness_and_non_health_routes_require_bearer():
+    """Keep liveness public while requiring identity for application routes."""
     client, _ = make_client()
     assert client.get("/health").status_code == 200
     assert client.get("/ready").json()["scope"] == "localhost-development"
@@ -81,6 +90,7 @@ def test_health_is_liveness_and_non_health_routes_require_bearer():
 
 
 def test_missing_oidc_configuration_fails_closed(monkeypatch):
+    """Return unavailable for protected routes when OIDC is not configured."""
     for name in ("MLAC_API_JWKS_URL", "MLAC_API_ISSUER", "MLAC_API_AUDIENCE"):
         monkeypatch.delenv(name, raising=False)
     app = create_app(model_registry=ModelRegistry(), evolution_controller=EvolutionController())
@@ -91,6 +101,7 @@ def test_missing_oidc_configuration_fails_closed(monkeypatch):
 
 
 def test_models_and_proposals_are_scoped_to_issuer_and_subject():
+    """Prevent one principal from reading or mutating another principal's models."""
     client, token = make_client()
     alice = auth(token("alice"))
     bob = auth(token("bob"))
@@ -123,6 +134,7 @@ def test_models_and_proposals_are_scoped_to_issuer_and_subject():
 
 
 def test_invalid_architecture_and_proposal_types_return_422():
+    """Return validation errors for malformed architecture and proposal fields."""
     client, token = make_client()
     headers = auth(token("alice"))
     assert client.post("/models", headers=headers, json={}).status_code == 422
@@ -141,12 +153,14 @@ def test_invalid_architecture_and_proposal_types_return_422():
 
 
 def test_invalid_issuer_or_audience_is_rejected():
+    """Reject correctly signed tokens with the wrong issuer or audience."""
     client, token = make_client()
     assert client.get("/models", headers=auth(token("alice", issuer="https://attacker.example/"))).status_code == 401
     assert client.get("/models", headers=auth(token("alice", audience="other-api"))).status_code == 401
 
 
 def test_unknown_critical_jwt_header_extension_is_rejected():
+    """Reject signed JWTs that require an unsupported critical header extension."""
     client, token = make_client()
     unknown_critical_header = {
         "crit": ["x-mlac-policy"],
@@ -157,6 +171,7 @@ def test_unknown_critical_jwt_header_extension_is_rejected():
 
 
 def test_pre_authentication_rate_limit_bounds_invalid_token_requests():
+    """Limit unauthenticated requests before they can trigger JWKS resolution."""
     client, _ = make_client(pre_auth_rate_limit=1)
     invalid = auth("not-a-jwt")
     assert client.get("/models", headers=invalid).status_code == 401
@@ -166,6 +181,7 @@ def test_pre_authentication_rate_limit_bounds_invalid_token_requests():
 
 
 def test_per_principal_rate_limit_returns_retry_after():
+    """Apply a separate authenticated request limit for each principal."""
     client, token = make_client(rate_limit=1)
     headers = auth(token("alice"))
     assert client.get("/models", headers=headers).status_code == 200
@@ -175,6 +191,7 @@ def test_per_principal_rate_limit_returns_retry_after():
 
 
 def test_oversized_request_is_rejected_before_route_authentication():
+    """Reject a declared oversized body before parsing or route authentication."""
     client, _ = make_client()
     response = client.post(
         "/models",
@@ -184,7 +201,25 @@ def test_oversized_request_is_rejected_before_route_authentication():
     assert response.status_code == 413
 
 
+def test_streamed_oversized_request_is_rejected_without_content_length():
+    """Reject streamed bodies that exceed the cap even without Content-Length."""
+    client, _ = make_client()
+
+    def chunks():
+        """Yield two chunks whose combined size exceeds the configured cap."""
+        yield b"x" * 600_000
+        yield b"x" * 600_000
+
+    response = client.post(
+        "/models",
+        content=chunks(),
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 413
+
+
 def test_cli_allows_only_loopback_bind_hosts():
+    """Keep the CLI bind surface restricted to loopback addresses."""
     assert is_loopback_host("127.0.0.1")
     assert is_loopback_host("::1")
     assert is_loopback_host("localhost")
@@ -193,6 +228,7 @@ def test_cli_allows_only_loopback_bind_hosts():
 
 
 def test_intelligence_planning_route_requires_identity_and_returns_proposals():
+    """Require identity before returning proposal-only planning output."""
     client, token = make_client()
     payload = {
         "model_id": "baseline-001",

@@ -32,12 +32,14 @@ class RequestBodyLimitMiddleware:
     """Reject oversized request bodies before JSON parsing buffers them."""
 
     def __init__(self, app: Any, *, max_bytes: int):
+        """Initialize the ASGI wrapper with a positive byte limit."""
         if isinstance(max_bytes, bool) or max_bytes < 1:
             raise ValueError("max_bytes must be a positive integer")
         self.app = app
         self.max_bytes = max_bytes
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        """Count streamed body bytes and reject oversized HTTP requests."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -57,6 +59,7 @@ class RequestBodyLimitMiddleware:
         received = 0
 
         async def limited_receive() -> dict:
+            """Count each ASGI body chunk before passing it downstream."""
             nonlocal received
             message = await receive()
             if message["type"] == "http.request":
@@ -72,6 +75,7 @@ class RequestBodyLimitMiddleware:
 
     @staticmethod
     async def _reject(send: Any) -> None:
+        """Send the fixed 413 response without reflecting request data."""
         body = b'{"detail":"request body too large"}'
         await send({
             "type": "http.response.start",
@@ -88,6 +92,7 @@ class _PrincipalRateLimiter:
     """Small process-local sliding-window limiter for the localhost API."""
 
     def __init__(self, *, limit: int, window_seconds: float):
+        """Configure a positive request count and time window."""
         if isinstance(limit, bool) or limit < 1 or window_seconds <= 0:
             raise ValueError("rate limit and window must be positive")
         self.limit = limit
@@ -96,6 +101,7 @@ class _PrincipalRateLimiter:
         self._lock = Lock()
 
     def check(self, key: str) -> None:
+        """Record one request or raise with the remaining retry delay."""
         now = time.monotonic()
         with self._lock:
             events = self._events.setdefault(key, deque())
@@ -111,10 +117,12 @@ class PreAuthenticationRateLimitMiddleware:
     """Bound unauthenticated requests before they can trigger remote JWKS work."""
 
     def __init__(self, app: Any, *, rate_limiter: _PrincipalRateLimiter):
+        """Attach the per-peer limiter to the downstream ASGI application."""
         self.app = app
         self.rate_limiter = rate_limiter
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        """Limit non-health requests before route authentication or JWKS access."""
         if scope["type"] != "http" or scope.get("path") in {"/health", "/ready"}:
             await self.app(scope, receive, send)
             return
@@ -141,6 +149,7 @@ class PreAuthenticationRateLimitMiddleware:
 
 
 def _validate_identity_url(value: str, *, setting: str) -> None:
+    """Require HTTPS identity endpoints, except for loopback development URLs."""
     parsed = urlparse(value)
     local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
     if not parsed.netloc or (parsed.scheme != "https" and not local_http):
@@ -203,6 +212,7 @@ def create_app(
     app.state.storage_mode = "process-local"
 
     def require_principal(credentials=Depends(bearer)) -> str:
+        """Verify a bearer JWT and return its issuer/subject-scoped principal."""
         if not auth_configured:
             raise HTTPException(status_code=503, detail="OIDC authentication is not configured")
         if credentials is None or credentials.scheme.lower() != "bearer":
@@ -252,13 +262,14 @@ def create_app(
 
     @app.get("/ready")
     def ready() -> dict[str, str]:
-        """Report local API readiness; this is not a production-readiness signal."""
+        """Report local API readiness without implying production readiness."""
         if not auth_configured:
             raise HTTPException(status_code=503, detail="OIDC authentication is not configured")
         return {"status": "ready", "scope": "localhost-development", "storage": "process-local"}
 
     @app.post("/models")
     def register_model(payload: dict[str, Any], principal: str = Depends(require_principal)):
+        """Register a model owned by the authenticated principal."""
         try:
             architecture = Architecture.from_dict(payload)
             record = model_store.register(architecture, metadata={"owner": principal})
@@ -268,6 +279,7 @@ def create_app(
 
     @app.get("/models")
     def list_models(principal: str = Depends(require_principal)):
+        """List only models owned by the authenticated principal."""
         return [
             {
                 "model_id": record.model_id,
@@ -281,6 +293,7 @@ def create_app(
 
     @app.get("/models/{model_id}")
     def get_model(model_id: str, principal: str = Depends(require_principal)):
+        """Return a model only to its authenticated owner."""
         try:
             record = model_store.get(model_id)
         except KeyError as exc:
@@ -295,6 +308,7 @@ def create_app(
         payload: dict[str, Any],
         principal: str = Depends(require_principal),
     ):
+        """Create a policy-validated proposal for an owned model."""
         try:
             record = model_store.get(model_id)
         except KeyError as exc:
@@ -320,6 +334,7 @@ def create_app(
 
     @app.get("/proposals")
     def list_proposals(principal: str = Depends(require_principal)):
+        """List proposals associated with the authenticated principal's models."""
         owned_model_ids = {
             record.model_id for record in model_store.list()
             if record.metadata.get("owner") == principal
@@ -334,6 +349,7 @@ def create_app(
         payload: dict[str, Any],
         _principal: str = Depends(require_principal),
     ):
+        """Return a validated proposal-only architecture plan."""
         model_id = payload.get("model_id")
         architecture = payload.get("architecture")
         objective = payload.get("objective")
