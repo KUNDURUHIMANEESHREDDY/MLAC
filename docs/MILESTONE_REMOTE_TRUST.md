@@ -29,8 +29,11 @@ Example:
     assert remote.verify(record)
 
 The local ArtifactRegistry remains the local cache/index. Persist remote bucket,
-key, version ID, digest and retention metadata with each evaluation. Never treat
-an S3 ETag as a content hash.
+key, version ID, digest and retention metadata with each evaluation. Duplicate
+uploads resolve the current object version first and compare bytes from that
+exact version; reads and verification remain pinned to the recorded version.
+Verification also compares the remote Object Lock retention timestamp with the
+recorded retention timestamp. Never treat an S3 ETag as a content hash.
 
 ## Independent runtime identity
 
@@ -71,7 +74,15 @@ Object Lock retention is intentionally difficult to shorten; test it in a
 non-production bucket. It protects object versions, not availability, KMS keys,
 account access or all metadata. Provider compatibility must be tested.
 
+The remote artifact adapter and runtime verifier are wired into the evaluation
+pipeline as opt-in hooks. Requiring runtime identity fails closed unless the
+runner supplies a valid statement from the configured independent authority.
+The controller consumes the runtime-identity nonce after a successful worker
+exit and before accepting its report; a later report or evaluation failure
+still consumes that proof, so retries require fresh authority-issued evidence.
+
 These modules are reusable primitives, not yet a complete production rollout.
-The remote artifact adapter and runtime verifier still need wiring into the
-evaluation pipeline and a deployed independent attestation authority. Until
-that integration is complete, do not claim end-to-end remote attestation.
+A deployed independent attestation authority, an orchestrator-backed runner
+that supplies runtime_identity_evidence, and end-to-end operational acceptance
+remain required. Until those are independently deployed and tested, do not
+claim end-to-end remote attestation.
