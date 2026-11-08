@@ -13,14 +13,14 @@ from threading import Lock
 from typing import Any
 from urllib.parse import urlparse
 
-from mlac.evolution import EvolutionController
-from mlac.ir import Architecture
-from mlac.master_intelligence import MasterIntelligenceEngine
-from mlac.openai_backend import OpenAIProviderError, OpenAIResponsesBackend
 from mlac.chat_completions_backend import (
     ChatCompletionsProviderError,
     OpenAICompatibleChatBackend,
 )
+from mlac.evolution import EvolutionController
+from mlac.ir import Architecture
+from mlac.master_intelligence import MasterIntelligenceEngine
+from mlac.openai_backend import OpenAIProviderError, OpenAIResponsesBackend
 from mlac.registry import ModelRegistry
 
 
