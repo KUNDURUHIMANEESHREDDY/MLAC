@@ -65,3 +65,14 @@ def test_designer_emits_parameter_mappings_and_initialization_contracts():
     assert architecture.initialization
     assert all(mapping.checkpoint_key is None for mapping in architecture.parameter_mappings)
     assert len(architecture.graph_nodes) == 4
+
+
+def test_designer_bounds_combinatorial_search_before_enumeration():
+    constraints = DesignConstraints(
+        input_size=4, output_size=2,
+        hidden_sizes=tuple(range(1, 101)),
+        min_layers=1, max_layers=8,
+        search_evaluation_limit=1000,
+    )
+    with pytest.raises(ValueError, match="exceeding search_evaluation_limit"):
+        ArchitectureDesigner().generate(constraints)
