@@ -110,6 +110,19 @@ trained_student = result.model
 For LoRA, call `fit(mode="lora", lora_targets=(LoRATarget("encoder.0", rank=8),))`
 and omit the teacher.
 
+## V1 operating limits
+
+This implementation is a deterministic, single-process CPU trainer for bounded
+models and in-memory tensor splits. The default hard caps are 25 million model
+parameters, 100,000 examples per split, 256 MiB of input tensors per split,
+16 MiB of labels per split, and 100,000 update steps by default (the config
+cannot exceed 1 million). It supports one tensor input per model call, AdamW,
+and none/cosine/step scheduling. It does not yet provide GPU/accelerator
+training, distributed data parallelism, mixed precision, gradient accumulation,
+streaming datasets, arbitrary optimizer plugins, or resumable on-disk training
+checkpoints. Treat it as a bounded v1 training primitive, not a production-scale
+multi-billion-parameter training service.
+
 ## Candidate evaluation and promotion boundary
 
 Training completion is not promotion. `TrainingPromotionWorkflow`
