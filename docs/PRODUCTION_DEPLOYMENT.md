@@ -21,6 +21,7 @@ This runbook deploys the OIDC-authenticated API as a single API instance behind 
 - An OIDC provider with a production issuer, audience, and HTTPS JWKS endpoint.
 - Strong PostgreSQL and Redis passwords and a private .env file.
 - A tested backup bucket with S3 versioning and Object Lock COMPLIANCE enabled.
+- A workload/instance IAM role for the backup process with narrowly scoped S3 permissions; avoid long-lived AWS access keys in .env.
 
 The main-branch workflow publishes immutable image tags to ghcr.io/kunduruhimaneeshreddy/mlac, including sha-<commit>. Pin MLAC_IMAGE to the exact commit that passed CI; do not deploy the mutable main tag. The default Docker subnet is 172.30.0.0/24. Change the subnet and the pinned proxy IP together in docker-compose.yml, Dockerfile, and this runbook if it conflicts with the host network.
 
@@ -64,7 +65,7 @@ Run a backup manually:
 
     docker compose exec -T mlac python /app/scripts/backup_state.py
 
-Schedule the same command from a restricted host scheduler (for example, a systemd timer) at the recovery-point objective approved by the operator. Alert on non-zero exit status and on a missing recent backup. The backup role should have only the required bucket inspection and object upload permissions; it must not be able to shorten Object Lock retention or delete protected versions.
+Schedule the same command from a restricted host scheduler (for example, a systemd timer) at the recovery-point objective approved by the operator. Alert on non-zero exit status and on a missing recent backup. The backup role should have only the required bucket inspection and object upload permissions; it must not be able to shorten Object Lock retention or delete protected versions. Provide credentials through the host/workload identity provider and verify the container can reach it; do not store long-lived AWS access keys in the repository or image.
 
 Restore drills must be performed in an isolated environment. Download a retained backup and verify its SHA-256 against trusted backup metadata. For PostgreSQL, validate the archive with pg_restore --list, stop the API, and restore with pg_restore --no-owner --no-acl --clean --if-exists --exit-on-error. For SQLite, run PRAGMA integrity_check and restore while the API is stopped. Then verify /ready, tenant isolation, and representative model/proposal reads. Record the achieved recovery point and recovery time.
 
