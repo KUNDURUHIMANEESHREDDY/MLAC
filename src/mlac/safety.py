@@ -74,6 +74,10 @@ class SafetyKernel:
     ) -> None:
         self._baseline = policy or GuardrailPolicy()
         self._baseline_digest = _canonical_digest(asdict(self._baseline))
+        if self._baseline.allow_production_mutations and expected_policy_sha256 is None:
+            raise PermissionError(
+                "Production-enabled policy requires an externally pinned expected_policy_sha256"
+            )
         if expected_policy_sha256 is not None and not hmac.compare_digest(
             self._baseline_digest, expected_policy_sha256
         ):
