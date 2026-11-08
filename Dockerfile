@@ -14,6 +14,7 @@ COPY scripts ./scripts
 RUN python -m pip install --upgrade pip \
     && pip install '.[api,production]'
 
+RUN mkdir -p /var/lib/mlac && chown 10001:10001 /var/lib/mlac
 USER 10001:10001
 EXPOSE 8000
 CMD ["uvicorn", "mlac.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=172.30.0.2"]
