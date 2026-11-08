@@ -99,6 +99,7 @@ The pipeline can authorize only a candidate operation. It does not deploy or pro
 - The optional API requires OIDC JWT authentication and issuer/subject ownership checks for every non-health route. Request bodies are capped at 1 MiB; pre-authentication requests are limited per peer before JWKS resolution, and authenticated principals have a separate process-local limit. The CLI disables proxy-header trust and rejects non-loopback binds.
 - The API registry and both rate limiters remain process-local and non-durable; they do not coordinate across workers. Durable tenant-scoped storage, transactional migrations, distributed rate limiting, backup/restore, TLS gateway deployment, and deployed acceptance remain release blockers.
 - Trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
+- Host-side sandbox output collection uses descriptor-relative no-follow traversal and fails closed without POSIX openat/O_NOFOLLOW support; native Windows candidate evaluation is not yet supported.
 
 See docs/ARCHITECTURE.md and docs/PHASE4.md through docs/PHASE7.md.
 

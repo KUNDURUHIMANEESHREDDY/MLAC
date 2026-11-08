@@ -1,4 +1,8 @@
-from mlac.sandbox import DockerSandboxRunner, SandboxLimits
+import os
+
+import pytest
+
+from mlac.sandbox import DockerSandboxRunner, SandboxLimits, _read_output_files
 
 DIGEST_IMAGE = "python@sha256:" + "a" * 64
 
@@ -86,3 +90,142 @@ def test_identity_mount_must_be_distinct_and_existing(tmp_path):
     with pytest.raises(ValueError, match="identity_dir must be an existing directory"):
         runner.run(candidate_dir=candidate, trusted_dir=trusted,
                    identity_dir=tmp_path / "missing", command=["/worker"])
+
+
+def test_output_collection_reads_nested_regular_files(tmp_path):
+    output = tmp_path / "output"
+    nested = output / "nested"
+    nested.mkdir(parents=True)
+    (output / "report.json").write_bytes(b'{"ok":true}')
+    (nested / "metrics.bin").write_bytes(b"metrics")
+
+    assert _read_output_files(output, 64) == {
+        "report.json": b'{"ok":true}',
+        "nested/metrics.bin": b"metrics",
+    }
+
+
+def test_output_collection_skips_symlink_files_and_directories(tmp_path):
+    output = tmp_path / "output"
+    output.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("host-secret", encoding="utf-8")
+    (output / "linked-file").symlink_to(outside / "secret.txt")
+    (output / "linked-directory").symlink_to(outside, target_is_directory=True)
+
+    assert _read_output_files(output, 1024) == {}
+
+
+def test_output_collection_skips_special_files(tmp_path):
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("FIFO creation is not supported on this platform")
+    output = tmp_path / "output"
+    output.mkdir()
+    os.mkfifo(output / "worker-pipe")
+
+    assert _read_output_files(output, 1024) == {}
+
+
+def test_output_collection_enforces_aggregate_byte_limit(tmp_path):
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "first").write_bytes(b"1234")
+    (output / "second").write_bytes(b"5678")
+
+    with pytest.raises(RuntimeError, match="output_bytes limit"):
+        _read_output_files(output, 7)
+
+
+def test_output_collection_rejects_invalid_limit(tmp_path):
+    output = tmp_path / "output"
+    output.mkdir()
+    with pytest.raises(ValueError, match="non-negative integer"):
+        _read_output_files(output, True)
+
+
+def test_output_collection_fails_closed_without_descriptor_relative_nofollow(monkeypatch, tmp_path):
+    import mlac.sandbox as sandbox
+
+    monkeypatch.setattr(
+        sandbox.os,
+        "supports_dir_fd",
+        set(sandbox.os.supports_dir_fd) - {sandbox.os.open},
+    )
+    with pytest.raises(RuntimeError, match="openat and O_NOFOLLOW"):
+        sandbox._read_output_files(tmp_path, 1024)
+
+
+def test_runner_checks_safe_output_support_before_starting_docker(monkeypatch, tmp_path):
+    import mlac.sandbox as sandbox
+
+    monkeypatch.setattr(
+        sandbox.os,
+        "supports_dir_fd",
+        set(sandbox.os.supports_dir_fd) - {sandbox.os.open},
+    )
+    monkeypatch.setattr(
+        sandbox.shutil,
+        "which",
+        lambda _: pytest.fail("Docker must not be inspected or started"),
+    )
+    runner = DockerSandboxRunner(image=DIGEST_IMAGE)
+    with pytest.raises(RuntimeError, match="openat and O_NOFOLLOW"):
+        runner.run(candidate_dir=tmp_path, command=["/worker"])
+
+
+def test_output_collection_skips_symlink_replaced_after_stat(monkeypatch, tmp_path):
+    import mlac.sandbox as sandbox
+
+    output = tmp_path / "output"
+    output.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("host-secret", encoding="utf-8")
+    target = output / "report.json"
+    target.write_text('{"safe":true}', encoding="utf-8")
+
+    original_stat = sandbox.os.stat
+    replaced = False
+
+    def stat_then_replace(path, *args, **kwargs):
+        nonlocal replaced
+        result = original_stat(path, *args, **kwargs)
+        if path == "report.json" and kwargs.get("dir_fd") is not None and not replaced:
+            target.unlink()
+            target.symlink_to(outside)
+            replaced = True
+        return result
+
+    supported = set(sandbox.os.supports_dir_fd)
+    supported.add(stat_then_replace)
+    monkeypatch.setattr(sandbox.os, "supports_dir_fd", supported)
+    monkeypatch.setattr(sandbox.os, "stat", stat_then_replace)
+
+    assert sandbox._read_output_files(output, 1024) == {}
+    assert replaced
+
+
+def test_output_collection_enforces_limit_when_file_grows_during_read(monkeypatch, tmp_path):
+    import mlac.sandbox as sandbox
+
+    output = tmp_path / "output"
+    output.mkdir()
+    growing = output / "report.json"
+    growing.write_bytes(b"12")
+
+    original_read = sandbox.os.read
+    grew = False
+
+    def grow_before_read(fd, size):
+        nonlocal grew
+        if not grew:
+            with growing.open("ab") as stream:
+                stream.write(b"3456")
+            grew = True
+        return original_read(fd, size)
+
+    monkeypatch.setattr(sandbox.os, "read", grow_before_read)
+
+    with pytest.raises(RuntimeError, match="output_bytes limit"):
+        sandbox._read_output_files(output, 4)
+    assert grew
