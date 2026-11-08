@@ -86,3 +86,60 @@ def test_lora_rejects_unknown_targets_and_distillation_requires_teacher():
         )
     with pytest.raises(ValueError, match="teacher"):
         TrainingEngine().fit(model=make_model(), dataset=make_dataset(), mode="distillation")
+
+
+def test_training_promotion_workflow_routes_candidate_and_training_evidence_to_pipeline(tmp_path):
+    from mlac.training_engine import TrainingPromotionWorkflow
+
+    class Builder:
+        def build(self, *, result, output_dir):
+            torch.save(dict(result.checkpoint_state), output_dir / "candidate.pt")
+            (output_dir / "candidate_manifest.json").write_text(
+                '{"schema_version":1,"operation":"profile_model","parameters":{}}',
+                encoding="utf-8",
+            )
+
+    class Pipeline:
+        def run(self, **kwargs):
+            self.kwargs = kwargs
+            assert (kwargs["candidate_dir"] / "training-evidence.json").is_file()
+            return {"governed": True}
+
+    dataset = make_dataset()
+    result = TrainingEngine().fit(
+        model=make_model(), teacher=make_model(), dataset=dataset,
+        mode="distillation",
+        config=TrainingConfig(epochs=2, batch_size=16, scheduler="none"),
+    )
+    pipeline = Pipeline()
+    workflow = TrainingPromotionWorkflow(pipeline=pipeline, candidate_builder=Builder())
+    outcome = workflow.evaluate(
+        result=result, trusted_evaluation_dir=tmp_path,
+        model_id="classifier-v1", candidate_id="trained-candidate-1",
+    )
+    assert outcome == {"governed": True}
+    assert pipeline.kwargs["operation"] == "training:distillation"
+    assert pipeline.kwargs["model_id"] == "classifier-v1"
+
+
+def test_training_promotion_rejects_non_worker_compatible_bundle():
+    from mlac.training_engine import TrainingPromotionWorkflow
+
+    class Builder:
+        def build(self, *, result, output_dir):
+            (output_dir / "candidate.pt").write_bytes(b"not-a-real-checkpoint")
+
+    class Pipeline:
+        def run(self, **kwargs):
+            raise AssertionError("pipeline must not run for an invalid candidate bundle")
+
+    result = TrainingEngine().fit(
+        model=make_model(), teacher=make_model(), dataset=make_dataset(),
+        mode="distillation", config=TrainingConfig(epochs=1, scheduler="none"),
+    )
+    workflow = TrainingPromotionWorkflow(pipeline=Pipeline(), candidate_builder=Builder())
+    with pytest.raises(ValueError, match="exactly"):
+        workflow.evaluate(
+            result=result, trusted_evaluation_dir=".",
+            model_id="classifier-v1", candidate_id="bad-candidate",
+        )
