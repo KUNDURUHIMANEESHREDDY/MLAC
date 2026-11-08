@@ -12,8 +12,10 @@ permissions:
   contents: read
   packages: write
 
+# Serialize publishers across commits. The current-main guard below also skips
+# an older workflow_run that completes after a newer commit has reached main.
 concurrency:
-  group: mlac-container-${{ github.event.workflow_run.head_sha }}
+  group: mlac-container-main
   cancel-in-progress: false
 
 jobs:
@@ -58,10 +60,44 @@ jobs:
             sleep 20
           done
 
+      - name: Check whether the verified commit is still the main tip
+        id: tip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          if [[ "$current_sha" == "$EXPECTED_SHA" ]]; then
+            echo "is_tip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_tip=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Verified commit ${EXPECTED_SHA} is no longer main (current: ${current_sha}); publishing only its immutable SHA tag."
+          fi
+
       - name: Normalize image name
         id: image
         shell: bash
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set image tags
+        id: tags
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          IS_MAIN_TIP: ${{ steps.tip.outputs.is_tip }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "tags<<EOF"
+            echo "${IMAGE_NAME}:sha-${EXPECTED_SHA}"
+            if [[ "$IS_MAIN_TIP" == "true" ]]; then
+              echo "${IMAGE_NAME}:main"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -73,13 +109,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish verified main image
+      - name: Build and publish verified image tags
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: |
-            ${{ steps.image.outputs.name }}:main
-            ${{ steps.image.outputs.name }}:sha-${{ github.event.workflow_run.head_sha }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
