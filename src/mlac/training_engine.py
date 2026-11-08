@@ -12,20 +12,23 @@ import math
 import re
 import tempfile
 from copy import deepcopy
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Protocol
 
 try:
     import torch
-    from torch import Tensor, nn
     import torch.nn.functional as F
+    from torch import Tensor, nn
 except ImportError as exc:  # pragma: no cover
     raise ImportError("Training requires 'pip install mlac[torch]'") from exc
 
 from mlac.weight_engine import (
-    WeightOptimizationPlan, WeightOptimizationStep, optimize_weights,
+    WeightOptimizationPlan,
+    WeightOptimizationStep,
     distillation_loss,
+    optimize_weights,
 )
 
 
@@ -550,7 +553,7 @@ class TrainingPromotionWorkflow:
                     raise ValueError(f"candidate artifact {name!r} must be a regular file within 512 MiB")
             manifest = json.loads((candidate_dir / "candidate_manifest.json").read_text(encoding="utf-8"))
             if not isinstance(manifest, dict):
-                raise ValueError("candidate_manifest.json must contain a JSON object")
+                raise TypeError("candidate_manifest.json must contain a JSON object")
             evidence = {
                 "schema_version": 1,
                 "training": result.summary(),
