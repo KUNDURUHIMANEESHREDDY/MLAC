@@ -141,8 +141,9 @@ not every possible computation graph.
 Declared `InitializationStrategy` entries are applied during compilation to
 parameters mapped to the target tensor. Built-in methods include zeros, ones,
 constant, normal, uniform, Xavier uniform/normal, Kaiming uniform/normal, and
-orthogonal initialization. Optional seeds are isolated from the caller's RNG
-state.
+orthogonal initialization. Strategy-specific seeded draws are isolated from
+the caller's RNG state; normal framework module construction still follows
+PyTorch's standard initialization behavior.
 
 A node can bind module parameters to canonical IR parameter names through
 `attributes.parameter_bindings`. For example,
