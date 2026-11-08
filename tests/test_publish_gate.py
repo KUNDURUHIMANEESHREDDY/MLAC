@@ -81,7 +81,7 @@ def test_publisher_serializes_main_and_skips_superseded_main_tags() -> None:
     assert "group: mlac-container-main" in source
     assert "cancel-in-progress: false" in source
     assert "commits/main" in source
-    assert 'current_sha == "$EXPECTED_SHA"' in source
+    assert 'if [[ "$current_sha" == "$EXPECTED_SHA" ]]' in source
     assert 'if [[ "$IS_MAIN_TIP" == "true" ]]' in source
     assert '${IMAGE_NAME}:sha-${EXPECTED_SHA}' in source
     assert "tags: ${{ steps.tags.outputs.tags }}" in source
