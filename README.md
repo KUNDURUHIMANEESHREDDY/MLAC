@@ -21,6 +21,8 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 - Optional S3 Object Lock COMPLIANCE artifact backend with versioned, content-addressed uploads.
 - Independent runtime-identity verifier for authority-signed SPIFFE/image/measurement statements, with durable nonce replay protection.
 - Evaluation-pipeline hooks for mandatory runtime evidence and remote artifact archival.
+- Optional API authentication with externally issued OIDC JWTs, JWKS signature verification, issuer/audience validation, and issuer/subject-scoped model and proposal access.
+- API request-body limits and per-principal process-local rate limiting; non-loopback API binds are rejected while durable multi-tenant storage and deployment acceptance remain incomplete.
 
 ## Quick start
 
@@ -30,7 +32,9 @@ MLAC is an open-source research and engineering platform for inspecting machine-
     pytest
     mlac version
 
-Optional API: pip install -e ".[api]" then mlac serve. Keep the unauthenticated API on localhost.
+Optional API: install `pip install -e ".[api]"` and configure `MLAC_API_JWKS_URL`, `MLAC_API_ISSUER`, and `MLAC_API_AUDIENCE` from a trusted OIDC provider before running `mlac serve`. Every non-health route requires a signed bearer JWT with issuer, audience, subject, issued-at, and expiry claims. The API verifies signing keys through the configured JWKS endpoint and scopes models/proposals to the issuer plus subject. Missing identity configuration fails closed with HTTP 503.
+
+The CLI accepts loopback hosts only (`127.0.0.1`, `::1`, or `localhost`) and rejects non-loopback binds. The API registry is still process-local, and its rate limiter is process-local; neither is suitable for multi-worker or production deployment. Durable tenant-scoped storage, distributed rate limiting, TLS gateway deployment, and end-to-end security acceptance remain release blockers.
 
 ## Candidate evaluation workflow
 
@@ -79,7 +83,8 @@ The pipeline can authorize only a candidate operation. It does not deploy or pro
 - Candidate input and trusted evaluation artifacts are mounted read-only and separately; no controller, policy, recovery, credential, or home-directory mounts are provided.
 - Worker reports are trusted only to the extent that the reviewed, digest-pinned worker image and runtime are trusted.
 - Docker is not a complete defense against a compromised host, kernel, daemon, or runtime. Use a dedicated worker VM/host and stronger isolation for hostile code.
-- The optional API is unauthenticated; keep it on localhost.
+- The optional API requires OIDC JWT authentication and issuer/subject ownership checks for every non-health route. Request bodies are capped at 1 MiB and authenticated principals have a process-local rate limit.
+- The API registry is still process-local and non-durable; rate limits do not coordinate across workers. The CLI blocks non-loopback binds, so this API remains localhost-development-only.
 - Trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
 
 See docs/ARCHITECTURE.md and docs/PHASE4.md through docs/PHASE7.md.
