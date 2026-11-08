@@ -87,3 +87,56 @@ def test_restore_requires_private_destination_directory(tmp_path: Path) -> None:
         restore_sqlite_backup(backup, public_directory / "restored.sqlite3", digest)
 
     assert not (public_directory / "restored.sqlite3").exists()
+
+
+def test_restore_closes_source_if_destination_connection_fails(
+    tmp_path: Path,
+) -> None:
+    backup = tmp_path / "backup.sqlite3"
+    digest = _backup(backup)
+    destination = tmp_path / "restored.sqlite3"
+    real_connect = sqlite3.connect
+    opened_source = None
+
+    def fail_destination_connect(database, *args, **kwargs):
+        nonlocal opened_source
+        if opened_source is None:
+            opened_source = real_connect(database, *args, **kwargs)
+            return opened_source
+        raise sqlite3.OperationalError("simulated destination open failure")
+
+    with (
+        patch("scripts.restore_backup.verify_backup", return_value={"format": "sqlite", "sha256": digest}),
+        patch("scripts.restore_backup.sqlite3.connect", side_effect=fail_destination_connect),
+        pytest.raises(sqlite3.OperationalError, match="destination open failure"),
+    ):
+        restore_sqlite_backup(backup, destination, digest)
+
+    assert opened_source is not None
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        opened_source.execute("SELECT 1")
+    assert not destination.exists()
+
+
+def test_restore_syncs_file_and_parent_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backup = tmp_path / "backup.sqlite3"
+    digest = _backup(backup)
+    destination = tmp_path / "isolated" / "restored.sqlite3"
+    destination.parent.mkdir(mode=0o700)
+    real_fsync = __import__("os").fsync
+    synced_modes: list[int] = []
+
+    def record_fsync(descriptor: int) -> None:
+        synced_modes.append(__import__("os").fstat(descriptor).st_mode)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr("scripts.restore_backup.os.fsync", record_fsync)
+
+    restore_sqlite_backup(backup, destination, digest)
+
+    assert len(synced_modes) == 2
+    assert stat.S_ISREG(synced_modes[0])
+    assert stat.S_ISDIR(synced_modes[1])
