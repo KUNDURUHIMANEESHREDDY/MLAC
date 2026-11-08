@@ -4,7 +4,6 @@ import time
 from types import SimpleNamespace
 
 import jwt
-import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
@@ -25,7 +24,7 @@ class StaticJWKClient:
         return SimpleNamespace(key=self.public_key)
 
 
-def make_client(*, rate_limit=60):
+def make_client(*, rate_limit=60, pre_auth_rate_limit=120):
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     app = create_app(
         model_registry=ModelRegistry(),
@@ -34,11 +33,14 @@ def make_client(*, rate_limit=60):
         issuer=ISSUER,
         audience=AUDIENCE,
         rate_limit=rate_limit,
+        pre_auth_rate_limit=pre_auth_rate_limit,
     )
     client = TestClient(app)
 
-    def token(subject, *, issuer=ISSUER, audience=AUDIENCE):
+    def token(subject, *, issuer=ISSUER, audience=AUDIENCE, headers=None):
         now = int(time.time())
+        token_headers = {"kid": "test-key"}
+        token_headers.update(headers or {})
         return jwt.encode(
             {
                 "iss": issuer,
@@ -49,7 +51,7 @@ def make_client(*, rate_limit=60):
             },
             private_key,
             algorithm="RS256",
-            headers={"kid": "test-key"},
+            headers=token_headers,
         )
 
     return client, token
@@ -124,6 +126,9 @@ def test_invalid_architecture_and_proposal_types_return_422():
     client, token = make_client()
     headers = auth(token("alice"))
     assert client.post("/models", headers=headers, json={}).status_code == 422
+    malformed = architecture()
+    malformed["name"] = 1
+    assert client.post("/models", headers=headers, json=malformed).status_code == 422
 
     created = client.post("/models", headers=headers, json=architecture())
     model_id = created.json()["model_id"]
@@ -139,6 +144,25 @@ def test_invalid_issuer_or_audience_is_rejected():
     client, token = make_client()
     assert client.get("/models", headers=auth(token("alice", issuer="https://attacker.example/"))).status_code == 401
     assert client.get("/models", headers=auth(token("alice", audience="other-api"))).status_code == 401
+
+
+def test_unknown_critical_jwt_header_extension_is_rejected():
+    client, token = make_client()
+    unknown_critical_header = {
+        "crit": ["x-mlac-policy"],
+        "x-mlac-policy": "require-mfa",
+    }
+    response = client.get("/models", headers=auth(token("alice", headers=unknown_critical_header)))
+    assert response.status_code == 401
+
+
+def test_pre_authentication_rate_limit_bounds_invalid_token_requests():
+    client, _ = make_client(pre_auth_rate_limit=1)
+    invalid = auth("not-a-jwt")
+    assert client.get("/models", headers=invalid).status_code == 401
+    limited = client.get("/models", headers=invalid)
+    assert limited.status_code == 429
+    assert int(limited.headers["retry-after"]) >= 1
 
 
 def test_per_principal_rate_limit_returns_retry_after():
@@ -166,7 +190,6 @@ def test_cli_allows_only_loopback_bind_hosts():
     assert is_loopback_host("localhost")
     assert not is_loopback_host("0.0.0.0")
     assert not is_loopback_host("192.0.2.10")
-
 
 
 def test_intelligence_planning_route_requires_identity_and_returns_proposals():

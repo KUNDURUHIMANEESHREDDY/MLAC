@@ -85,7 +85,7 @@ class RequestBodyLimitMiddleware:
 
 
 class _PrincipalRateLimiter:
-    """Small process-local per-principal limiter for the localhost API."""
+    """Small process-local sliding-window limiter for the localhost API."""
 
     def __init__(self, *, limit: int, window_seconds: float):
         if isinstance(limit, bool) or limit < 1 or window_seconds <= 0:
@@ -95,16 +95,49 @@ class _PrincipalRateLimiter:
         self._events: dict[str, deque[float]] = {}
         self._lock = Lock()
 
-    def check(self, principal: str) -> None:
+    def check(self, key: str) -> None:
         now = time.monotonic()
         with self._lock:
-            events = self._events.setdefault(principal, deque())
+            events = self._events.setdefault(key, deque())
             while events and now - events[0] >= self.window_seconds:
                 events.popleft()
             if len(events) >= self.limit:
                 retry_after = max(1, int(self.window_seconds - (now - events[0])))
                 raise RuntimeError(str(retry_after))
             events.append(now)
+
+
+class PreAuthenticationRateLimitMiddleware:
+    """Bound unauthenticated requests before they can trigger remote JWKS work."""
+
+    def __init__(self, app: Any, *, rate_limiter: _PrincipalRateLimiter):
+        self.app = app
+        self.rate_limiter = rate_limiter
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] != "http" or scope.get("path") in {"/health", "/ready"}:
+            await self.app(scope, receive, send)
+            return
+
+        client = scope.get("client")
+        peer = client[0] if client and client[0] else "unknown"
+        try:
+            self.rate_limiter.check(peer)
+        except RuntimeError as exc:
+            body = b'{"detail":"Authentication request rate limit exceeded"}'
+            await send({
+                "type": "http.response.start",
+                "status": 429,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                    (b"retry-after", str(exc).encode("ascii")),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        await self.app(scope, receive, send)
 
 
 def _validate_identity_url(value: str, *, setting: str) -> None:
@@ -125,6 +158,8 @@ def create_app(
     audience: str | None = None,
     rate_limit: int = 60,
     rate_window_seconds: float = 60,
+    pre_auth_rate_limit: int = 120,
+    pre_auth_window_seconds: float = 60,
     max_body_bytes: int = _MAX_REQUEST_BODY_BYTES,
 ) -> Any:
     """Create an API that resolves every non-health request to an OIDC principal."""
@@ -146,10 +181,14 @@ def create_app(
     if jwks_client is None and configured_jwks_url and configured_issuer and configured_audience:
         _validate_identity_url(configured_jwks_url, setting="MLAC_API_JWKS_URL")
         _validate_identity_url(configured_issuer, setting="MLAC_API_ISSUER")
-        jwks_client = PyJWKClient(configured_jwks_url, cache_keys=True)
+        jwks_client = PyJWKClient(configured_jwks_url, cache_keys=True, timeout=5)
 
     auth_configured = bool(jwks_client is not None and configured_issuer and configured_audience)
-    rate_limiter = _PrincipalRateLimiter(limit=rate_limit, window_seconds=rate_window_seconds)
+    principal_rate_limiter = _PrincipalRateLimiter(limit=rate_limit, window_seconds=rate_window_seconds)
+    peer_rate_limiter = _PrincipalRateLimiter(
+        limit=pre_auth_rate_limit,
+        window_seconds=pre_auth_window_seconds,
+    )
     bearer = HTTPBearer(auto_error=False)
     app = FastAPI(
         title="MLAC",
@@ -159,6 +198,7 @@ def create_app(
         openapi_url=None,
     )
     app.add_middleware(RequestBodyLimitMiddleware, max_bytes=max_body_bytes)
+    app.add_middleware(PreAuthenticationRateLimitMiddleware, rate_limiter=peer_rate_limiter)
     app.state.auth_configured = auth_configured
     app.state.storage_mode = "process-local"
 
@@ -196,7 +236,7 @@ def create_app(
             raise HTTPException(status_code=401, detail="Bearer token subject is invalid")
         principal = f"{configured_issuer}|{subject}"
         try:
-            rate_limiter.check(principal)
+            principal_rate_limiter.check(principal)
         except RuntimeError as exc:
             raise HTTPException(
                 status_code=429,
@@ -223,7 +263,7 @@ def create_app(
             architecture = Architecture.from_dict(payload)
             record = model_store.register(architecture, metadata={"owner": principal})
             return {"model_id": record.model_id, "architecture": record.architecture.to_dict()}
-        except (KeyError, TypeError, ValueError) as exc:
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail="Model architecture is invalid") from exc
 
     @app.get("/models")
