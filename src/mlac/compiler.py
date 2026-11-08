@@ -181,7 +181,7 @@ class CompiledArchitecture(nn.Module):
 def _topological_order(architecture: Architecture) -> tuple[list[GraphNode], dict[str, list[str]]]:
     nodes = {node.node_id: node for node in architecture.graph_nodes}
     order_index = {node.node_id: i for i, node in enumerate(architecture.graph_nodes)}
-    incoming: dict[str, list[str]] = defaultdict(list)
+    incoming: dict[str, list[tuple[str, str]]] = defaultdict(list)
     outgoing: dict[str, list[str]] = defaultdict(list)
     indegree = {node_id: 0 for node_id in nodes}
     for edge in architecture.graph_edges:
@@ -237,14 +237,18 @@ def compile_architecture(
         node.node_id: index for index, node in enumerate(architecture.graph_nodes)
         if node.operation == "input"
     }
-    input_nodes = sorted(
-        (node for node in architecture.graph_nodes if node.operation == "input"),
-        key=lambda node: (int(node.attributes.get("input_index", input_order[node.node_id])), input_order[node.node_id]),
-    )
-    if not input_nodes:
+    raw_inputs = [node for node in architecture.graph_nodes if node.operation == "input"]
+    input_indices = {
+        node.node_id: int(node.attributes.get("input_index", index))
+        for index, node in enumerate(raw_inputs)
+    }
+    if not raw_inputs:
         raise ValueError("compiled architecture requires at least one input node")
-    if len({int(node.attributes.get("input_index", i)) for i, node in enumerate(input_nodes)}) != len(input_nodes):
+    if any(index < 0 for index in input_indices.values()):
+        raise ValueError("input node indices must be non-negative")
+    if len(set(input_indices.values())) != len(input_indices):
         raise ValueError("input node indices must be unique")
+    input_nodes = sorted(raw_inputs, key=lambda node: input_indices[node.node_id])
     for node in input_nodes:
         if incoming.get(node.node_id):
             raise ValueError(f"input node {node.node_id!r} cannot have incoming edges")
