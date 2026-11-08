@@ -162,7 +162,7 @@ def _target_is_empty(target: PostgresTarget) -> bool:
                         FROM pg_catalog.pg_class AS relation
                         JOIN pg_catalog.pg_namespace AS namespace
                           ON namespace.oid = relation.relnamespace
-                        WHERE namespace.nspname NOT IN ('pg_catalog', 'information_schema')
+                        WHERE namespace.nspname !~ '^pg_' AND namespace.nspname <> 'information_schema'
                           AND relation.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
                     )
                     OR EXISTS (
@@ -170,19 +170,19 @@ def _target_is_empty(target: PostgresTarget) -> bool:
                         FROM pg_catalog.pg_proc AS proc
                         JOIN pg_catalog.pg_namespace AS namespace
                           ON namespace.oid = proc.pronamespace
-                        WHERE namespace.nspname NOT IN ('pg_catalog', 'information_schema')
+                        WHERE namespace.nspname !~ '^pg_' AND namespace.nspname <> 'information_schema'
                     )
                     OR EXISTS (
                         SELECT 1
                         FROM pg_catalog.pg_type AS typ
                         JOIN pg_catalog.pg_namespace AS namespace
                           ON namespace.oid = typ.typnamespace
-                        WHERE namespace.nspname NOT IN ('pg_catalog', 'information_schema')
+                        WHERE namespace.nspname !~ '^pg_' AND namespace.nspname <> 'information_schema'
                     )
                     OR EXISTS (
                         SELECT 1
                         FROM pg_catalog.pg_namespace
-                        WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'public')
+                        WHERE nspname !~ '^pg_' AND nspname NOT IN ('information_schema', 'public')
                     )
                 """
             )
@@ -217,7 +217,7 @@ def _count_restored_tables(target: PostgresTarget) -> int:
                 FROM pg_catalog.pg_class AS relation
                 JOIN pg_catalog.pg_namespace AS namespace
                   ON namespace.oid = relation.relnamespace
-                WHERE namespace.nspname NOT IN ('pg_catalog', 'information_schema')
+                WHERE namespace.nspname !~ '^pg_' AND namespace.nspname <> 'information_schema'
                   AND relation.relkind IN ('r', 'p')
                 """
             )
