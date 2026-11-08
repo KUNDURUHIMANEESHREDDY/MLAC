@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/opt/mlac-worker/lib
 
-RUN python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.5.1
+RUN python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple torch==2.5.1
 
 RUN mkdir -p /opt/mlac-worker/lib/mlac
 COPY src/mlac/__init__.py /opt/mlac-worker/lib/mlac/__init__.py
