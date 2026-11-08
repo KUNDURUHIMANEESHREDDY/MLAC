@@ -98,10 +98,13 @@ def _resolve_parent(model: nn.Module, path: str) -> tuple[nn.Module, str, nn.Mod
 
 
 def _resolve_parameter(model: nn.Module, path: str) -> tuple[nn.Parameter, nn.Module, str]:
-    if "." not in path:
-        raise ValueError("parameter target must include a module and parameter name")
-    module_path, parameter_name = path.rsplit(".", 1)
-    module = model.get_submodule(module_path)
+    if not path:
+        raise ValueError("parameter target must be non-empty")
+    if "." in path:
+        module_path, parameter_name = path.rsplit(".", 1)
+        module = model.get_submodule(module_path)
+    else:
+        module, parameter_name = model, path
     parameter = getattr(module, parameter_name, None)
     if not isinstance(parameter, nn.Parameter):
         raise KeyError(f"{path!r} is not a registered parameter")
