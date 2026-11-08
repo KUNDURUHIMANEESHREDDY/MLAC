@@ -68,3 +68,16 @@ def test_rejects_duplicate_split_membership(tmp_path):
             splits={"train": ["data.jsonl"], "validation": ["data.jsonl"]},
             signer_id="signer", private_key_pem=private,
         )
+
+
+def test_signed_materialized_dataset_fingerprint_round_trip(tmp_path):
+    (tmp_path / "train.jsonl").write_text("source rows", encoding="utf-8")
+    private, public = pem_pair()
+    fingerprint = "a" * 64
+    envelope = create_signed_dataset_manifest(
+        tmp_path, dataset_id="materialized", revision="r1",
+        splits={"train": ["train.jsonl"]}, signer_id="signer",
+        private_key_pem=private, dataset_fingerprint=fingerprint,
+    )
+    result = verify_signed_dataset_manifest(envelope, tmp_path, trusted_signers={"signer": public})
+    assert result["dataset_fingerprint"] == fingerprint
