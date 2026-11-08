@@ -135,7 +135,7 @@ def inspect_torch_model(model, *, name="pytorch-model") -> Architecture:
         counts[kind] += 1
         config = {}
         for attr in ("in_features", "out_features", "num_features", "num_heads",
-                     "num_key_value_heads", "num_kv_heads", "head_dim", "hidden_size",
+                     "num_attention_heads", "num_key_value_heads", "num_kv_heads", "head_dim", "hidden_size",
                      "intermediate_size", "embed_dim", "d_model", "p", "kernel_size", "stride"):
             value = getattr(module, attr, None)
             if isinstance(value, (int, float, str, tuple)):
@@ -288,24 +288,34 @@ def inspect_torch_model_full(
             traced = fx.symbolic_trace(model)
             if example_inputs is not None:
                 from torch.fx.passes.shape_prop import ShapeProp
-                ShapeProp(traced).propagate(*example_inputs)
+                training_states = [(module, module.training) for module in model.modules()]
+                try:
+                    traced.eval()
+                    with torch.no_grad():
+                        ShapeProp(traced).propagate(*example_inputs)
+                finally:
+                    for module, was_training in training_states:
+                        module.training = was_training
             module_map = dict(traced.named_modules())
+            parameter_names = set(dict(model.named_parameters()))
             for node in traced.graph.nodes:
                 target = str(node.target)
                 module_type = None
-                parameter_names: tuple[str, ...] = ()
+                mapped_parameters: tuple[str, ...] = ()
                 if node.op == "call_module":
                     module = module_map.get(target)
                     if module is not None:
                         module_type = type(module).__name__
-                        parameter_names = tuple(
+                        mapped_parameters = tuple(
                             f"{target}.{param_name}" if param_name else target
                             for param_name, _param in module.named_parameters(recurse=True)
                         )
+                elif node.op == "get_attr" and target in parameter_names:
+                    mapped_parameters = (target,)
                 shape, dtype = _shape_dtype(node)
                 inputs = tuple(source.name for source in node.all_input_nodes)
                 nodes.append(GraphNode(node.name, node.op, target, module_type,
-                                       inputs, shape, dtype, parameter_names))
+                                       inputs, shape, dtype, mapped_parameters))
                 edges.extend(GraphEdge(source.name, node.name) for source in node.all_input_nodes)
         except Exception as exc:
             trace_error = f"{type(exc).__name__}: {str(exc)[:500]}"
