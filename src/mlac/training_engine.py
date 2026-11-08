@@ -264,6 +264,8 @@ class TrainingEngine:
             config: TrainingConfig | None = None, teacher: nn.Module | None = None,
             lora_targets: Sequence[LoRATarget] = ()) -> TrainingResult:
         config = config or TrainingConfig()
+        if not isinstance(config, TrainingConfig):
+            raise TypeError("config must be a TrainingConfig")
         if not isinstance(model, nn.Module) or not isinstance(dataset, TrainingDataset):
             raise TypeError("model and dataset must be supported MLAC objects")
         if mode not in {"distillation", "lora"}:
@@ -285,7 +287,15 @@ class TrainingEngine:
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(config.seed)
             candidate = deepcopy(model).cpu()
+            parameter_dtypes = {parameter.dtype for parameter in candidate.parameters() if parameter.is_floating_point()}
+            if len(parameter_dtypes) != 1 or dataset.train.inputs.dtype not in parameter_dtypes:
+                raise ValueError("model and dataset must use one matching floating-point dtype")
             teacher_copy = deepcopy(teacher).cpu().eval() if teacher is not None else None
+            if teacher_copy is not None and any(
+                parameter.is_floating_point() and parameter.dtype != dataset.train.inputs.dtype
+                for parameter in teacher_copy.parameters()
+            ):
+                raise ValueError("teacher and dataset must use the same floating-point dtype")
             target_names: list[str] = []
             if mode == "lora":
                 steps = []
