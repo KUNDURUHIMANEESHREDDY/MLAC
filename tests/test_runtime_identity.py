@@ -1,5 +1,8 @@
-import base64, hashlib
+import base64
+import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
@@ -38,3 +41,50 @@ def test_rejects_wrong_spiffe_trust_domain(tmp_path):
     proof["signature"]=base64.b64encode(key.sign(canonical_json(proof["statement"]))).decode()
     with pytest.raises(PermissionError,match="trust domain mismatch"):
         verifier.verify(proof,expected_worker_id="worker-7",expected_image_digest=proof["statement"]["image_digest"])
+
+
+
+def test_rejects_invalid_expected_configuration_before_evidence(tmp_path):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    key = Ed25519PrivateKey.generate()
+    verifier = RuntimeIdentityVerifier(
+        trusted_authorities={"spire-prod": public_pem(key)},
+        nonce_db=tmp_path / "nonce.db",
+        trust_domain="mlac.example",
+        clock=lambda: now,
+    )
+    proof = make_envelope(key, now)
+    with pytest.raises(ValueError, match="expected image"):
+        verifier.verify(proof, expected_worker_id="worker-7", expected_image_digest="not-pinned")
+    with pytest.raises(ValueError, match="expected_worker_id"):
+        verifier.verify(proof, expected_worker_id="", expected_image_digest=proof["statement"]["image_digest"])
+
+
+def test_concurrent_replay_allows_exactly_one_verification(tmp_path):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    key = Ed25519PrivateKey.generate()
+    verifier = RuntimeIdentityVerifier(
+        trusted_authorities={"spire-prod": public_pem(key)},
+        nonce_db=tmp_path / "nonce.db",
+        trust_domain="mlac.example",
+        clock=lambda: now,
+    )
+    proof = make_envelope(key, now)
+    barrier = Barrier(2)
+
+    def attempt():
+        barrier.wait()
+        try:
+            verifier.verify(
+                proof,
+                expected_worker_id="worker-7",
+                expected_image_digest=proof["statement"]["image_digest"],
+            )
+            return "accepted"
+        except PermissionError:
+            return "rejected"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(lambda _: attempt(), range(2)))
+
+    assert sorted(outcomes) == ["accepted", "rejected"]
