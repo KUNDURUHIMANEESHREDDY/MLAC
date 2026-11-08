@@ -48,6 +48,8 @@ def test_trusted_candidate_builder_prunes_attention_heads(tmp_path):
     state = torch.load(path, map_location="cpu", weights_only=True)
     assert state["attention.qkv.weight"].shape[0] == 3 * 3 * 4
     assert state["attention.out_proj.weight"].shape[1] == 3 * 4
+    candidate_manifest = json.loads((output / "candidate_manifest.json").read_text())
+    assert candidate_manifest["operation"] == "prune_attention_heads"
 
 
 def test_workflow_sends_built_candidates_through_pipeline(tmp_path):
@@ -76,3 +78,30 @@ def test_workflow_cannot_exceed_governance_candidate_limit(tmp_path):
         workflow.run(model_id="baseline", architecture=Architecture(name="tiny", family="transformer"),
             objective="Improve quality", trusted_evaluation_dir=trusted, max_experiments=4)
     assert not pipeline.calls
+
+
+def test_candidate_builder_reconstructs_mlp_resize_and_moe_candidates(tmp_path):
+    trusted = trusted_bundle(tmp_path)
+    output = tmp_path / "candidate"
+    output.mkdir()
+    resize_plan = SimpleNamespace(
+        operation="resize_mlp_hidden", parameters={"hidden_size": 24}
+    )
+    path = TorchTransformerCandidateBuilder().build(
+        plan=resize_plan, trusted_evaluation_dir=trusted, output_dir=output
+    )
+    resized = torch.load(path, map_location="cpu", weights_only=True)
+    assert resized["mlp.0.weight"].shape[0] == 24
+    output.joinpath("candidate.pt").unlink()
+    output.joinpath("candidate_manifest.json").unlink()
+
+    moe_plan = SimpleNamespace(
+        operation="convert_mlp_to_moe",
+        parameters={"num_experts": 3, "top_k": 2, "expert_noise_std": 0.001},
+    )
+    path = TorchTransformerCandidateBuilder().build(
+        plan=moe_plan, trusted_evaluation_dir=trusted, output_dir=output
+    )
+    moe = torch.load(path, map_location="cpu", weights_only=True)
+    assert "mlp.router.weight" in moe
+    assert "mlp.experts.2.0.weight" in moe
