@@ -243,6 +243,9 @@ def create_app(
     except ImportError as exc:
         raise RuntimeError("Install API dependencies: pip install 'mlac[api]'") from exc
 
+    if state_store is not None and (model_registry is not None or evolution_controller is not None):
+        raise ValueError("state_store cannot be combined with injected registry/controller instances")
+
     if state_store is None and model_registry is None and evolution_controller is None:
         database_path = os.getenv("MLAC_API_STATE_DB")
         if database_path:
