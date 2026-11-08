@@ -46,7 +46,7 @@ def dirs(tmp_path):
     identity=tmp_path/"identity"
     candidate.mkdir(); trusted.mkdir(); identity.mkdir()
     (candidate/"candidate.pt").write_bytes(b"candidate checkpoint placeholder")
-    (trusted/"manifest.json").write_text("operator-controlled")
+    (trusted/"manifest.json").write_text(json.dumps({"schema_version":2,"dataset":"evaluation.jsonl"}))
     (trusted/"evaluation.jsonl").write_text('{"text":"verified evaluation sample"}\\n', encoding="utf-8")
     dataset_key=Ed25519PrivateKey.generate()
     dataset_private=dataset_key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption())
