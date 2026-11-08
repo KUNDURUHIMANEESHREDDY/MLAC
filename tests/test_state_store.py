@@ -106,3 +106,24 @@ def test_architecture_round_trip_normalizes_runtime_requirement_sequences():
     )
 
     assert Architecture.from_dict(original.to_dict()) == original
+
+
+def test_store_proposal_listing_applies_owner_and_model_id_filters(tmp_path):
+    """Apply both principal and model-ID filters in the durable query path."""
+    store = SQLiteStateStore(tmp_path / "scoped.sqlite3")
+    registry = ModelRegistry(state_store=store)
+    controller = EvolutionController(state_store=store)
+    alice = registry.register(architecture(), metadata={"owner": "alice"})
+    bob = registry.register(architecture(), metadata={"owner": "bob"})
+    alice_proposal = controller.propose(
+        alice.model_id, alice.architecture, hypothesis="Alice", operation="dropout"
+    )
+    controller.propose(
+        bob.model_id, bob.architecture, hypothesis="Bob", operation="dropout"
+    )
+
+    assert [item["proposal_id"] for item in controller.list_proposals(
+        owner="alice", model_ids={alice.model_id}
+    )] == [alice_proposal.proposal_id]
+    assert controller.list_proposals(owner="alice", model_ids=set()) == []
+    assert controller.list_proposals(owner="alice", model_ids={bob.model_id}) == []
