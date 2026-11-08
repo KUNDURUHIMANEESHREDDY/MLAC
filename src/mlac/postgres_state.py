@@ -19,24 +19,31 @@ class PostgresStateStore:
         ):
             raise ValueError("MLAC_API_DATABASE_URL must use postgresql://")
         try:
-            import psycopg
             from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
         except ImportError as exc:
             raise RuntimeError(
                 "Install the production extra to use PostgreSQL state storage"
             ) from exc
-        self._psycopg = psycopg
-        self._dict_row = dict_row
+        import os
+
+        pool_size = int(os.getenv("MLAC_API_DB_POOL_SIZE", "10"))
+        if not 1 <= pool_size <= 100:
+            raise ValueError("MLAC_API_DB_POOL_SIZE must be between 1 and 100")
         self.dsn = dsn
+        self._pool = ConnectionPool(
+            conninfo=dsn,
+            min_size=1,
+            max_size=pool_size,
+            timeout=_CONNECT_TIMEOUT_SECONDS,
+            kwargs={"connect_timeout": _CONNECT_TIMEOUT_SECONDS, "row_factory": dict_row},
+            open=True,
+        )
         self._initialize()
 
     def _connect(self):
-        """Open a bounded-timeout PostgreSQL connection with mapping rows."""
-        return self._psycopg.connect(
-            self.dsn,
-            connect_timeout=_CONNECT_TIMEOUT_SECONDS,
-            row_factory=self._dict_row,
-        )
+        """Borrow a bounded-timeout PostgreSQL connection from the process pool."""
+        return self._pool.connection()
 
     @staticmethod
     def _encode(value: Any, *, field: str) -> str:
@@ -131,6 +138,10 @@ class PostgresStateStore:
                     """,
                     (_SCHEMA_VERSION,),
                 )
+
+    def close(self) -> None:
+        """Close the process-local PostgreSQL connection pool."""
+        self._pool.close()
 
     def health_check(self) -> None:
         """Verify connectivity and the currently supported schema version."""
