@@ -12,6 +12,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pytest
 
+import scripts.restore_postgres_backup as restore_module
 from scripts.restore_postgres_backup import parse_postgres_target, restore_postgres_backup
 
 
@@ -74,17 +75,17 @@ def postgres_archive_and_target(tmp_path: Path):
     target_url = _database_url(base_url, target_name)
     created: list[str] = []
 
-    admin = psycopg2.connect(admin_url)
     try:
-        admin.autocommit = True
-        with admin.cursor() as cursor:
-            for name in (source_name, target_name):
-                cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-                created.append(name)
-    finally:
-        admin.close()
+        admin = psycopg2.connect(admin_url)
+        try:
+            admin.autocommit = True
+            with admin.cursor() as cursor:
+                for name in (source_name, target_name):
+                    cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+                    created.append(name)
+        finally:
+            admin.close()
 
-    try:
         source = parse_postgres_target(source_url)
         connection = psycopg2.connect(**source.connection_kwargs())
         try:
@@ -119,16 +120,17 @@ def postgres_archive_and_target(tmp_path: Path):
         digest = hashlib.sha256(backup.read_bytes()).hexdigest()
         yield backup, digest, target_url, target_name
     finally:
-        cleanup = psycopg2.connect(admin_url)
-        try:
-            cleanup.autocommit = True
-            with cleanup.cursor() as cursor:
-                for name in reversed(created):
-                    cursor.execute(
-                        sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name))
-                    )
-        finally:
-            cleanup.close()
+        if created:
+            cleanup = psycopg2.connect(admin_url)
+            try:
+                cleanup.autocommit = True
+                with cleanup.cursor() as cursor:
+                    for name in reversed(created):
+                        cursor.execute(
+                            sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name))
+                        )
+            finally:
+                cleanup.close()
 
 
 def test_postgres_backup_restores_into_empty_disposable_database(
@@ -191,3 +193,45 @@ def test_postgres_restore_rejects_digest_mismatch_before_connecting(
     backup, _digest, target_url, _target_name = postgres_archive_and_target
     with pytest.raises(ValueError, match="SHA-256"):
         restore_postgres_backup(backup, target_url, "0" * 64)
+
+
+def test_postgres_restore_uses_the_exact_verified_snapshot(
+    postgres_archive_and_target,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backup, digest, target_url, target_name = postgres_archive_and_target
+    real_verify = restore_module.verify_backup
+
+    def verify_snapshot_then_mutate_original(
+        snapshot_path: Path,
+        expected_sha256: str,
+        backup_format: str = "auto",
+    ):
+        snapshot = Path(snapshot_path)
+        assert snapshot != backup
+        result = real_verify(
+            snapshot,
+            expected_sha256,
+            backup_format=backup_format,
+        )
+        backup.write_bytes(b"replacement after verification")
+        return result
+
+    monkeypatch.setattr(
+        restore_module,
+        "verify_backup",
+        verify_snapshot_then_mutate_original,
+    )
+    result = restore_module.restore_postgres_backup(backup, target_url, digest)
+
+    assert result["database"] == target_name
+    assert result["sha256"] == digest
+    target = restore_module.parse_postgres_target(target_url)
+    psycopg2 = pytest.importorskip("psycopg2")
+    connection = psycopg2.connect(**target.connection_kwargs())
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT value FROM restore_probe WHERE id = %s", (1,))
+            assert cursor.fetchone() == ("preserved",)
+    finally:
+        connection.close()
