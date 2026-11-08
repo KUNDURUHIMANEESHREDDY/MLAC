@@ -1,19 +1,23 @@
 """Controller-owned sandbox -> evaluation -> governance -> ledger workflow."""
 from __future__ import annotations
-import json, math, re
+
+import json
+import math
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
+
+from mlac.artifact_registry import ArtifactRegistry
+from mlac.attestation import canonical_json, directory_digests, verify_worker_result
 from mlac.benchmark import BenchmarkResult
+from mlac.dataset_manifest import verify_signed_dataset_manifest
 from mlac.evaluation import EvaluationPolicy, EvaluationResult
 from mlac.experiments import ExperimentStore
 from mlac.governance import GovernancePolicy
-from mlac.attestation import canonical_json, directory_digests, verify_worker_result
-from mlac.artifact_registry import ArtifactRegistry
 from mlac.runtime_identity import RuntimeIdentityVerifier
-from mlac.dataset_manifest import verify_signed_dataset_manifest
 
 class SandboxRunner(Protocol):
     def run(self, *, candidate_dir: str | Path, command: list[str],
@@ -74,7 +78,7 @@ def _benchmark(value: Any, label: str) -> BenchmarkResult:
         raise ValueError(f"{label}.latency_ms_per_iteration must be finite and >= 0")
     if not isinstance(shape,list) or any(isinstance(d,bool) or not isinstance(d,int) or d < 0 for d in shape):
         raise ValueError(f"{label}.output_shape must be a list of non-negative integers")
-    if not isinstance(finite,bool): raise ValueError(f"{label}.finite_output must be boolean")
+    if not isinstance(finite,bool): raise TypeError(f"{label}.finite_output must be boolean")
     return BenchmarkResult(count,float(latency),iters,tuple(shape),finite)
 
 def _quality(value: Any, label: str) -> dict[str,float]:
@@ -201,7 +205,7 @@ class CandidateEvaluationPipeline:
         except (UnicodeDecodeError,json.JSONDecodeError) as exc:
             raise ValueError("worker manifest is not valid UTF-8 JSON") from exc
         if not isinstance(worker_manifest,dict):
-            raise ValueError("worker manifest must be a JSON object")
+            raise TypeError("worker manifest must be a JSON object")
         if isinstance(worker_manifest.get("schema_version"), bool):
             raise ValueError("worker manifest schema_version must be integer 1 or 2")
         if worker_manifest.get("schema_version")==2:
@@ -233,7 +237,7 @@ class CandidateEvaluationPipeline:
         if execution.exit_code != 0:
             raise RuntimeError(f"Candidate worker failed with exit code {execution.exit_code}: {execution.stderr[:2000]}")
         report_bytes=execution.output_files.get("report.json")
-        if not isinstance(report_bytes,bytes): raise RuntimeError("Trusted worker did not produce /output/report.json")
+        if not isinstance(report_bytes,bytes): raise TypeError("Trusted worker did not produce /output/report.json")
         if len(report_bytes)>self.max_report_bytes: raise RuntimeError("Worker report exceeds configured report size limit")
         try: envelope=json.loads(report_bytes.decode("utf-8"))
         except (UnicodeDecodeError,json.JSONDecodeError) as exc: raise ValueError("Worker report is not valid UTF-8 JSON") from exc
