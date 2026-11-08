@@ -310,8 +310,10 @@ def _apply_initialization(compiled: CompiledArchitecture) -> None:
             continue
 
         devices = sorted({
-            parameter.device for parameter in targets if parameter.device.type == "cuda"
-        }, key=str)
+            parameter.device.index if parameter.device.index is not None
+            else torch.cuda.current_device()
+            for parameter in targets if parameter.device.type == "cuda"
+        })
         with torch.random.fork_rng(devices=devices):
             torch.manual_seed(strategy.seed)
             if devices:
