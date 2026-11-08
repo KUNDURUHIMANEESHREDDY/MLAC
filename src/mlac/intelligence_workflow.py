@@ -79,16 +79,18 @@ class TorchTransformerCandidateBuilder:
             "resize_attention_heads", "resize_mlp_hidden", "set_mlp_activation",
             "convert_mlp_to_moe",
         }:
-            operation_parameters = {
-                "resize_attention_heads": {"num_heads": params["num_heads"]},
-                "resize_mlp_hidden": {"hidden_size": params["hidden_size"]},
-                "set_mlp_activation": {"activation": params["activation"]},
-                "convert_mlp_to_moe": {
+            if plan.operation == "resize_attention_heads":
+                operation_parameters = {"num_heads": params["num_heads"]}
+            elif plan.operation == "resize_mlp_hidden":
+                operation_parameters = {"hidden_size": params["hidden_size"]}
+            elif plan.operation == "set_mlp_activation":
+                operation_parameters = {"activation": params["activation"]}
+            else:
+                operation_parameters = {
                     "num_experts": params["num_experts"],
                     "top_k": params["top_k"],
                     "expert_noise_std": params.get("expert_noise_std", 1e-3),
-                },
-            }[plan.operation]
+                }
             model = modify_model(
                 model, Modification(plan.operation, operation_parameters)
             ).module.eval()
