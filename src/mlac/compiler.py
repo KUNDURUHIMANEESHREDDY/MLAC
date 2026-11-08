@@ -34,8 +34,10 @@ class _Functional(nn.Module):
 class _Reshape(nn.Module):
     def __init__(self, shape: Sequence[int | str]):
         super().__init__()
-        if any(not isinstance(dim, int) or dim == 0 for dim in shape):
-            raise ValueError("compiled reshape dimensions must be non-zero integers")
+        if any(type(dim) is not int or dim < -1 for dim in shape):
+            raise ValueError("compiled reshape dimensions must be integers >= -1")
+        if sum(dim == -1 for dim in shape) > 1:
+            raise ValueError("compiled reshape may contain at most one inferred dimension")
         self.shape = tuple(int(dim) for dim in shape)
 
     def forward(self, value: Tensor) -> Tensor:
@@ -225,6 +227,11 @@ def compile_architecture(
                 raise ValueError("'input' is reserved by the MLAC-IR compiler")
             factories[name] = factory
 
+    unsupported_ports = [
+        edge for edge in architecture.graph_edges if edge.source_port != "output"
+    ]
+    if unsupported_ports:
+        raise ValueError("MLAC-IR v1 compiler supports one output port per node")
     ordered, incoming = _topological_order(architecture)
     input_order = {
         node.node_id: index for index, node in enumerate(architecture.graph_nodes)
@@ -268,6 +275,8 @@ def compile_architecture(
         if not isinstance(outputs, (list, tuple)) or not outputs:
             raise ValueError("metadata.outputs must be a non-empty list of node ids")
         output_nodes = list(outputs)
+        if len(output_nodes) != len(set(output_nodes)):
+            raise ValueError("metadata.outputs cannot contain duplicate node ids")
         unknown = set(output_nodes) - {node.node_id for node in architecture.graph_nodes}
         if unknown:
             raise ValueError(f"unknown graph outputs: {', '.join(sorted(unknown))}")
