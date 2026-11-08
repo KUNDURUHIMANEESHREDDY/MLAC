@@ -22,7 +22,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 - Optional S3 Object Lock COMPLIANCE artifact backend with versioned, content-addressed uploads.
 - Independent runtime-identity verifier for authority-signed SPIFFE/image/measurement statements, with durable nonce replay protection.
 - Evaluation-pipeline hooks for mandatory runtime evidence and remote artifact archival.
-- Optional API authentication with externally issued OIDC JWTs, JWKS signature verification, issuer/audience validation, and issuer/subject-scoped model and proposal access; bounded request bodies, persistent SQLite metadata, and optional shared Redis rate limits. The supported production-candidate topology places the API behind Caddy TLS and does not publish the API or Redis ports.
+- Optional API authentication with externally issued OIDC JWTs, JWKS signature verification, issuer/audience validation, and issuer/subject-scoped model and proposal access; bounded request bodies, persistent PostgreSQL metadata, and shared Redis rate limits. The supported production-candidate topology places the API behind Caddy TLS and does not publish the API or Redis ports.
 
 ## Quick start
 
@@ -36,7 +36,7 @@ Optional API: install `pip install -e ".[api]"` and configure `MLAC_API_JWKS_URL
 
 ## Production-candidate deployment
 
-The supported single-instance API topology uses the pinned GHCR image, Caddy-managed HTTPS, a persistent local SQLite metadata volume, and internal Redis-backed shared rate limiting. Configure OIDC, domain, image digest, and backup bucket before startup. Follow [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md) and review [docs/RELEASE_1_0_0.md](docs/RELEASE_1_0_0.md). This topology is not HA and is not considered production-deployed until the target-host acceptance checklist and restore drill pass.
+The supported API topology uses the pinned GHCR image, Caddy-managed HTTPS, a persistent PostgreSQL volume, and internal Redis-backed shared rate limiting. Configure OIDC, domain, image digest, and backup bucket before startup. Follow [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md) and review [docs/RELEASE_1_0_0.md](docs/RELEASE_1_0_0.md). This topology is not HA and is not considered production-deployed until the target-host acceptance checklist and restore drill pass.
 
 ## Master Intelligence planning
 
