@@ -1,8 +1,10 @@
 import pytest
+from datetime import datetime, timedelta, timezone
 from mlac.ir import Architecture, Component
 from mlac.registry import ModelRegistry
 from mlac.mutations import set_dropout_probability
 from mlac.governance import GovernancePolicy
+from mlac.safety import GuardrailPolicy, OperatorApproval, approval_signature, guardrail_policy_digest
 from mlac.evolution import EvolutionController
 
 def arch():
@@ -36,3 +38,40 @@ def test_evolution_is_proposal_only():
     p = c.propose("m1", arch(), hypothesis="Test lower dropout", operation="dropout",
                   parameters={"probability": .05})
     assert p.status == "proposed" and len(c.list_proposals()) == 1
+
+
+def test_governance_routes_candidate_authorization_through_safety_kernel():
+    GovernancePolicy().authorize(target="candidate", operation="prune-head", parameter_growth_ratio=0.01)
+    with pytest.raises(PermissionError, match="budget"):
+        GovernancePolicy().authorize(target="candidate", operation="expand", parameter_growth_ratio=0.5)
+
+
+def test_governance_production_requires_evaluation_and_signed_external_approval():
+    guardrails = GuardrailPolicy(allow_production_mutations=True)
+    policy = GovernancePolicy(
+        allow_production_mutations=True,
+        expected_policy_sha256=guardrail_policy_digest(guardrails),
+    )
+    key = b"operator-key-from-secret-manager"
+    payload = {
+        "approval_id": "governance-approval-1",
+        "model_id": "model-1",
+        "operation": "promote-candidate",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat(),
+    }
+    approval = OperatorApproval(**payload, signature=approval_signature(payload, key))
+    with pytest.raises(PermissionError, match="evaluation"):
+        policy.authorize(
+            target="production", operation="promote-candidate", model_id="model-1",
+            approval=approval, verification_key=key,
+        )
+    policy.authorize(
+        target="production", operation="promote-candidate", model_id="model-1",
+        approval=approval, verification_key=key, evaluation_passed=True,
+    )
+
+
+def test_governance_cannot_enable_production_without_external_policy_pin():
+    policy = GovernancePolicy(allow_production_mutations=True)
+    with pytest.raises(PermissionError, match="externally pinned"):
+        policy.authorize(target="production", operation="deploy", model_id="model-1")
