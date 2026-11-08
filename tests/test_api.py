@@ -329,7 +329,6 @@ def test_sqlite_api_state_survives_restart_and_keeps_principals_isolated(tmp_pat
     database = tmp_path / "api-state.sqlite3"
     first_client, first_token = make_client(state_store=SQLiteStateStore(database))
     alice = auth(first_token("alice"))
-    bob = auth(first_token("bob"))
 
     created = first_client.post("/models", headers=alice, json=architecture())
     assert created.status_code == 200
