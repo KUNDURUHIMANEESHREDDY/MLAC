@@ -17,11 +17,36 @@ from mlac.evolution import EvolutionController
 from mlac.ir import Architecture
 from mlac.master_intelligence import MasterIntelligenceEngine
 from mlac.openai_backend import OpenAIProviderError, OpenAIResponsesBackend
+from mlac.chat_completions_backend import (
+    ChatCompletionsProviderError,
+    OpenAICompatibleChatBackend,
+)
 from mlac.registry import ModelRegistry
+
+
+def _default_intelligence_engine() -> MasterIntelligenceEngine:
+    """Select a configured reasoning adapter without silently changing providers."""
+    selected = os.environ.get("MLAC_REASONING_PROVIDER")
+    if selected is None:
+        selected = (
+            "openai-responses"
+            if os.environ.get("MLAC_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+            else "rules"
+        )
+    if selected == "rules":
+        return MasterIntelligenceEngine()
+    if selected == "openai-responses":
+        return MasterIntelligenceEngine(backend=OpenAIResponsesBackend.from_env(required=True))
+    if selected == "openai-compatible":
+        return MasterIntelligenceEngine(backend=OpenAICompatibleChatBackend.from_env(required=True))
+    raise RuntimeError(
+        "MLAC_REASONING_PROVIDER must be one of: rules, openai-responses, openai-compatible"
+    )
+
 
 registry = ModelRegistry()
 evolution = EvolutionController()
-intelligence = MasterIntelligenceEngine(backend=OpenAIResponsesBackend.from_env())
+intelligence = _default_intelligence_engine()
 _MAX_REQUEST_BODY_BYTES = 1_048_576
 
 
@@ -391,7 +416,7 @@ def create_app(
         """Report the configured planning provider to an authenticated caller."""
         backend = planning_engine.backend
         return {
-            "provider": "openai" if backend is not None else "rules-only",
+            "provider": getattr(backend, "provider_name", "rules-only"),
             "model": getattr(backend, "model_name", None),
         }
 
@@ -420,8 +445,8 @@ def create_app(
                 constraints=constraints,
             )
             return report.to_dict()
-        except OpenAIProviderError as exc:
-            raise HTTPException(status_code=503, detail="OpenAI planning provider is temporarily unavailable") from exc
+        except (OpenAIProviderError, ChatCompletionsProviderError) as exc:
+            raise HTTPException(status_code=503, detail="Configured planning provider is temporarily unavailable") from exc
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail="Planning request is invalid") from exc
 
