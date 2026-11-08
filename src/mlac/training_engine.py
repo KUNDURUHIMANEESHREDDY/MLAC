@@ -39,8 +39,13 @@ class TensorSplit:
     def __post_init__(self) -> None:
         if not isinstance(self.inputs, Tensor) or self.inputs.ndim < 2:
             raise ValueError("inputs must be a tensor with shape [N,...]")
-        if self.inputs.device.type != "cpu" or not self.inputs.is_floating_point() or not torch.isfinite(self.inputs).all():
-            raise ValueError("inputs must be finite CPU floating-point tensors")
+        if self.inputs.device.type != "cpu":
+            raise ValueError("inputs must be CPU tensors")
+        if self.inputs.is_floating_point():
+            if not torch.isfinite(self.inputs).all():
+                raise ValueError("floating-point inputs must be finite")
+        elif self.inputs.dtype not in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
+            raise ValueError("inputs must be floating-point values or integer token IDs")
         count = self.inputs.shape[0]
         if count < 1 or count > 100_000:
             raise ValueError("each split must contain between 1 and 100000 examples")
@@ -49,8 +54,9 @@ class TensorSplit:
         if self.labels is not None and self.labels.numel() * self.labels.element_size() > 16 * 1024 * 1024:
             raise ValueError("each label split is limited to 16 MiB")
         if self.labels is not None:
-            if not isinstance(self.labels, Tensor) or self.labels.device.type != "cpu" or self.labels.shape != (count,):
-                raise ValueError("labels must be an integer tensor with shape [N]")
+            if (not isinstance(self.labels, Tensor) or self.labels.device.type != "cpu"
+                    or self.labels.ndim < 1 or self.labels.shape[0] != count):
+                raise ValueError("labels must be an integer tensor with leading dimension N")
             if self.labels.dtype not in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
                 raise ValueError("labels must use an integer dtype")
         if (not isinstance(self.sample_ids, tuple) or len(self.sample_ids) != count
@@ -82,6 +88,9 @@ class TrainingDataset:
             raise ValueError("all dataset splits must have identical input feature shapes")
         if any(split.inputs.dtype != self.train.inputs.dtype for split in (self.validation, self.heldout)):
             raise ValueError("all dataset splits must use the same input dtype")
+        label_shape = tuple(self.train.labels.shape[1:])
+        if any(tuple(split.labels.shape[1:]) != label_shape for split in (self.validation, self.heldout)):
+            raise ValueError("all dataset splits must use identical label shapes")
 
     @property
     def digest(self) -> str:
@@ -240,17 +249,19 @@ def _state_digest(state: Mapping[str, Tensor]) -> str:
 
 def _logits(model: nn.Module, inputs: Tensor) -> Tensor:
     output = model(inputs)
-    if not isinstance(output, Tensor) or output.ndim != 2 or not torch.isfinite(output).all():
-        raise ValueError("training models must return finite [batch, classes] logits")
+    if not isinstance(output, Tensor) or output.ndim < 2 or not torch.isfinite(output).all():
+        raise ValueError("training models must return finite [batch,...,classes] logits")
     return output
 
 
 def _classification_loss(logits: Tensor, labels: Tensor) -> Tensor:
     if labels.dtype not in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
         raise ValueError("classification labels must be integers")
+    if tuple(labels.shape) != tuple(logits.shape[:-1]):
+        raise ValueError("label shape must match model logits excluding the class dimension")
     if labels.numel() and (int(labels.min()) < 0 or int(labels.max()) >= logits.shape[-1]):
         raise ValueError("classification labels are outside the model output class range")
-    return F.cross_entropy(logits, labels.long())
+    return F.cross_entropy(logits.reshape(-1, logits.shape[-1]), labels.reshape(-1).long())
 
 
 def _evaluate(model: nn.Module, split: TensorSplit, *, mode: str, teacher: nn.Module | None,
@@ -270,9 +281,10 @@ def _evaluate(model: nn.Module, split: TensorSplit, *, mode: str, teacher: nn.Mo
                 )["loss"]
             else:
                 loss = _classification_loss(student_logits, labels)
-            losses += float(loss.item()) * inputs.shape[0]
+            units = labels.numel()
+            losses += float(loss.item()) * units
             correct += int((student_logits.argmax(dim=-1) == labels).sum().item())
-            count += inputs.shape[0]
+            count += units
     return losses / count, correct / count
 
 
@@ -312,14 +324,16 @@ class TrainingEngine:
             torch.manual_seed(config.seed)
             candidate = deepcopy(model).cpu()
             parameter_dtypes = {parameter.dtype for parameter in candidate.parameters() if parameter.is_floating_point()}
-            if len(parameter_dtypes) != 1 or dataset.train.inputs.dtype not in parameter_dtypes:
-                raise ValueError("model and dataset must use one matching floating-point dtype")
+            if len(parameter_dtypes) != 1:
+                raise ValueError("model must use one floating-point parameter dtype")
+            if dataset.train.inputs.is_floating_point() and dataset.train.inputs.dtype not in parameter_dtypes:
+                raise ValueError("floating-point inputs must match the model parameter dtype")
             teacher_copy = deepcopy(teacher).cpu().eval() if teacher is not None else None
             if teacher_copy is not None and any(
-                parameter.is_floating_point() and parameter.dtype != dataset.train.inputs.dtype
+                parameter.is_floating_point() and parameter.dtype not in parameter_dtypes
                 for parameter in teacher_copy.parameters()
             ):
-                raise ValueError("teacher and dataset must use the same floating-point dtype")
+                raise ValueError("teacher and student must use the same floating-point parameter dtype")
             target_names: list[str] = []
             if mode == "lora":
                 steps = []
@@ -387,8 +401,8 @@ class TrainingEngine:
                         loss.backward()
                         torch.nn.utils.clip_grad_norm_(trainable, config.gradient_clip_norm)
                         optimizer.step()
-                        weighted_loss += float(loss.detach().item()) * inputs.shape[0]
-                    train_loss = weighted_loss / dataset.train.inputs.shape[0]
+                        weighted_loss += float(loss.detach().item()) * labels.numel()
+                    train_loss = weighted_loss / dataset.train.labels.numel()
                     validation_loss, _ = _evaluate(
                         candidate, dataset.validation, mode=mode, teacher=teacher_copy, config=config,
                     )
