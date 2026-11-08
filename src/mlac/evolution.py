@@ -34,7 +34,11 @@ class EvolutionController:
             self._state_store.insert_proposal(proposal)
         return proposal
 
-    def list_proposals(self):
+    def list_proposals(self, *, owner=None, model_ids=None):
+        """List proposals scoped to a principal or a set of owned model IDs."""
         if self._state_store is not None:
-            return self._state_store.list_proposals()
-        return [asdict(item) for item in self._proposals]
+            return self._state_store.list_proposals(owner=owner)
+        proposals = self._proposals
+        if model_ids is not None:
+            proposals = [item for item in proposals if item.model_id in model_ids]
+        return [asdict(item) for item in proposals]
