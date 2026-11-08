@@ -367,6 +367,9 @@ class TrainingEngine:
             raise ValueError("teacher exceeds max_parameters")
         if dataset.train.labels is None or dataset.validation.labels is None or dataset.heldout.labels is None:
             raise ValueError("labels are required for all splits")
+        valid_train_targets = int((dataset.train.labels != -100).sum().item())
+        if valid_train_targets < 1:
+            raise ValueError("training split must contain at least one non-masked target")
         source_manifest_sha256 = None
         dataset_signer_id = None
         if dataset.signed_manifest is None:
@@ -475,7 +478,7 @@ class TrainingEngine:
                         torch.nn.utils.clip_grad_norm_(trainable, config.gradient_clip_norm)
                         optimizer.step()
                         weighted_loss += float(loss.detach().item()) * labels.numel()
-                    train_loss = weighted_loss / dataset.train.labels.numel()
+                    train_loss = weighted_loss / valid_train_targets
                     validation_loss, _ = _evaluate(
                         candidate, dataset.validation, mode=mode, teacher=teacher_copy, config=config,
                     )
