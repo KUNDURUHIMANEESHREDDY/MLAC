@@ -1,7 +1,7 @@
 name: tests
 on:
   push:
-    branches: [main, phase2-architecture-engineering]
+    branches: [main]
   pull_request:
 jobs:
   pytest:
