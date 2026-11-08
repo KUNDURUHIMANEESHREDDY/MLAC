@@ -51,6 +51,8 @@ _PLAN_SCHEMA = {
 class OpenAIResponsesBackend:
     """Calls /v1/responses and requests schema-constrained JSON proposals."""
 
+    provider_name = "openai-responses"
+
     def __init__(self, *, api_key: str, model: str = "gpt-6-astra",
                  base_url: str = "https://api.openai.com/v1", timeout: float = 60.0,
                  opener: Callable[..., Any] | None = None):
