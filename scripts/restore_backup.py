@@ -71,10 +71,9 @@ def restore_sqlite_backup(
 
     try:
         source_uri = backup.resolve(strict=True).as_uri() + "?mode=ro&immutable=1"
-        with (
-            sqlite3.connect(source_uri, uri=True, timeout=10) as source,
-            sqlite3.connect(target, timeout=10) as restored,
-        ):
+        source = sqlite3.connect(source_uri, uri=True, timeout=10)
+        restored = sqlite3.connect(target, timeout=10)
+        try:
             source.backup(restored)
             restored.execute("PRAGMA trusted_schema = OFF")
             restored.execute("PRAGMA query_only = ON")
@@ -84,13 +83,24 @@ def restore_sqlite_backup(
             table_count = restored.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
             ).fetchone()[0]
+        finally:
+            restored.close()
+            source.close()
 
         current = target.lstat()
         if not stat.S_ISREG(current.st_mode) or _identity(current) != created_identity:
             raise ValueError("restore target identity changed during restore")
         os.chmod(target, 0o600)
-        with target.open("rb") as restored_file:
-            os.fsync(restored_file.fileno())
+        sync_flags = os.O_RDWR
+        if hasattr(os, "O_NOFOLLOW"):
+            sync_flags |= os.O_NOFOLLOW
+        sync_descriptor = os.open(target, sync_flags)
+        try:
+            if _identity(os.fstat(sync_descriptor)) != created_identity:
+                raise ValueError("restore target identity changed before sync")
+            os.fsync(sync_descriptor)
+        finally:
+            os.close(sync_descriptor)
 
         return {
             "format": "sqlite",
