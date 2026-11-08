@@ -1,8 +1,6 @@
 services:
   mlac:
-    build:
-      context: .
-    image: mlac:production-candidate
+    image: ${MLAC_IMAGE:?Set an immutable GHCR image tag}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -39,6 +37,7 @@ services:
 
   redis:
     image: redis:7.4-alpine
+    user: redis
     restart: unless-stopped
     command:
       - sh
