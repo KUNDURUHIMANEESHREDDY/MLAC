@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
-
 from mlac.postgres_state import PostgresStateStore
 from mlac.sqlite_state import SQLiteStateStore
 
