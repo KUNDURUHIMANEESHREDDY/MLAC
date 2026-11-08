@@ -202,6 +202,8 @@ class CandidateEvaluationPipeline:
             raise ValueError("worker manifest is not valid UTF-8 JSON") from exc
         if not isinstance(worker_manifest,dict):
             raise ValueError("worker manifest must be a JSON object")
+        if isinstance(worker_manifest.get("schema_version"), bool):
+            raise ValueError("worker manifest schema_version must be integer 1 or 2")
         if worker_manifest.get("schema_version")==2:
             required_dataset_files=[worker_manifest.get("dataset")]
         elif worker_manifest.get("schema_version")==1:
