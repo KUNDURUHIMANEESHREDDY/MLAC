@@ -1,6 +1,11 @@
 """Master LLM Architecture Controller."""
 __version__ = "0.8.0"
-from mlac.ir import Architecture, Component, TensorSpec
+from mlac.ir import (
+    Architecture, CompatibilityConstraint, Component, GraphEdge, GraphNode,
+    InitializationStrategy, ParameterMapping, RuntimeCapabilities,
+    RuntimeRequirements, TensorSpec, WeightTransformationRequirement,
+    validate_compatibility,
+)
 from mlac.registry import ModelRegistry, ModelRecord
 from mlac.master_intelligence import MasterIntelligenceEngine, IntelligenceReport, OptimizationObjective
 from mlac.openai_backend import OpenAIResponsesBackend, OpenAIProviderError
@@ -11,7 +16,10 @@ from mlac.inspector import (
     inspect_torch_model, inspect_torch_model_full,
 )
 __all__ = [
-    "Architecture", "Component", "TensorSpec", "ModelRegistry", "ModelRecord",
+    "Architecture", "Component", "TensorSpec", "GraphNode", "GraphEdge",
+    "ParameterMapping", "InitializationStrategy", "CompatibilityConstraint",
+    "RuntimeRequirements", "RuntimeCapabilities", "WeightTransformationRequirement",
+    "validate_compatibility", "ModelRegistry", "ModelRecord",
     "MasterIntelligenceEngine", "IntelligenceReport", "OptimizationObjective",
     "OpenAIResponsesBackend", "OpenAIProviderError", "IntelligenceExperimentWorkflow",
     "IntelligenceWorkflowResult", "TorchTransformerCandidateBuilder", "__version__",
