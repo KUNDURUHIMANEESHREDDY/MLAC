@@ -105,7 +105,7 @@ class LoRATarget:
     dropout: float = 0.0
 
     def __post_init__(self) -> None:
-        if not isinstance(self.module, str) or not re.fullmatch(r"[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*", self.module):
+        if not isinstance(self.module, str) or not re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*", self.module):
             raise ValueError("LoRA module must be an explicit dotted module path")
         if isinstance(self.rank, bool) or not isinstance(self.rank, int) or not 1 <= self.rank <= 64:
             raise ValueError("LoRA rank must be an integer in [1, 64]")
