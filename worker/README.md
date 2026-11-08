@@ -204,17 +204,16 @@ credentials automatically.
 
 ## Current verified image
 
-The latest worker release completed its Docker build and synthetic signed-report
-smoke test successfully. Pin this exact immutable image reference:
+The worker release containing the architecture Modification Engine completed its Docker build and signed language-model worker smoke test successfully (GitHub Actions run 42467309097). Pin this exact immutable image reference:
 
-    ghcr.io/kunduruhimaneeshreddy/mlac-worker@sha256:36b06716bb0adc0fda9039434533520e687f58dbe36c5090e922b85186679501
+    ghcr.io/kunduruhimaneeshreddy/mlac-worker@sha256:945cb486bc630a398145e69b4071af0017e7b26c616500d82168cb8f7eb11d8a
 
 Controller configuration should use the same digest for both the runner image
 and the worker's `--worker-image` attestation argument. For example:
 
     worker_image_digest = (
         "ghcr.io/kunduruhimaneeshreddy/mlac-worker@sha256:"
-        "36b06716bb0adc0fda9039434533520e687f58dbe36c5090e922b85186679501"
+        "945cb486bc630a398145e69b4071af0017e7b26c616500d82168cb8f7eb11d8a"
     )
     pipeline = CandidateEvaluationPipeline(
         runner=runner,
