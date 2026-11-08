@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from pathlib import Path
 import pytest
 from mlac.attestation import canonical_json, directory_digests, generate_worker_keypair, sign_worker_result
 from mlac.artifact_registry import ArtifactRegistry
@@ -30,7 +31,7 @@ class FakeRunner:
         report_bytes=canonical_json(self.payload)
         attestation=sign_worker_result(report_bytes=report_bytes,
             artifact_sha256=directory_digests(candidate_dir,trusted_dir),
-            private_key_path=arg("--identity-key"),worker_id=arg("--worker-id"),worker_image=arg("--worker-image"))
+            private_key_path=Path(identity_dir)/"worker_ed25519_private.pem",worker_id=arg("--worker-id"),worker_image=arg("--worker-image"))
         if self.tamper: attestation["worker_image"]="attacker@sha256:"+"b"*64
         envelope={"schema_version":1,"report":self.payload,"attestation":attestation}
         return SimpleNamespace(exit_code=0,timed_out=False,stderr="",

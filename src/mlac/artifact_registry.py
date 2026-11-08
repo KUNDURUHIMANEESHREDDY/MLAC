@@ -71,15 +71,18 @@ class ArtifactRegistry:
             raise ValueError("evaluation identifiers and artifacts must be non-empty")
         linked = []
         now = datetime.now(timezone.utc).isoformat()
+        # Persist immutable blobs before opening the metadata transaction. This
+        # avoids holding a SQLite write lock while put_bytes uses its own connection.
+        for role, data in sorted(artifacts.items()):
+            if not role or not isinstance(data, bytes):
+                raise ValueError("artifact roles must be non-empty and values must be bytes")
+            item = self.put_bytes(data, media_type="application/json" if role.endswith("json") else "application/octet-stream")
+            linked.append((role, item))
         with self._connect() as db:
-            for role, data in sorted(artifacts.items()):
-                if not role or not isinstance(data, bytes):
-                    raise ValueError("artifact roles must be non-empty and values must be bytes")
-                item = self.put_bytes(data, media_type="application/json" if role.endswith("json") else "application/octet-stream")
+            for role, item in linked:
                 db.execute("INSERT INTO evaluation_artifacts VALUES (?,?,?,?,?,?)",
                     (evaluation_id, role, item["sha256"], model_id, candidate_id, now))
-                linked.append({"role": role, **item})
-        return linked
+        return [{"role": role, **item} for role, item in linked]
     def record_attestation(self, *, nonce: str, key_id: str, report_sha256: str, evaluation_id: str) -> None:
         """Persist a one-time nonce so a signed worker result cannot be replayed."""
         if not all((nonce, key_id, report_sha256, evaluation_id)):
