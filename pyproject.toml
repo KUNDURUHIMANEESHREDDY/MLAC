@@ -16,7 +16,7 @@ api = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "PyJWT[crypto]>=2.14.0,<3"]
 dev = ["pytest>=8", "ruff>=0.5", "jsonschema>=4", "cryptography>=42", "httpx>=0.27", "fastapi>=0.110", "PyJWT[crypto]>=2.14.0,<3"]
 attestation = ["cryptography>=42"]
 remote-storage = ["boto3>=1.34"]
-production = ["redis>=5,<7", "boto3>=1.34", "psycopg[binary]>=3.2,<4"]
+production = ["redis>=5,<7", "boto3>=1.34", "psycopg[binary,pool]>=3.2,<4"]
 [project.scripts]
 mlac = "mlac.cli:main"
 [tool.hatch.build.targets.wheel]
