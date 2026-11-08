@@ -193,6 +193,36 @@ def test_per_principal_rate_limit_returns_retry_after():
     assert int(limited.headers["retry-after"]) >= 1
 
 
+def test_rate_limiter_bounds_identity_cardinality_and_reclaims_expired_keys(monkeypatch):
+    """Keep unique peers/principals from growing the process-local limiter without bound."""
+    from mlac.api import _PrincipalRateLimiter
+
+    clock = [100.0]
+    monkeypatch.setattr("mlac.api.time.monotonic", lambda: clock[0])
+    limiter = _PrincipalRateLimiter(limit=2, window_seconds=10, max_keys=1)
+    limiter.check("first")
+
+    try:
+        limiter.check("second")
+    except RuntimeError as exc:
+        assert exc.args == ("10",)
+    else:
+        raise AssertionError("a full identity table must reject a new identity")
+
+    assert list(limiter._events) == ["first"]
+    clock[0] = 111.0
+    limiter.check("second")
+    assert list(limiter._events) == ["second"]
+    assert len(limiter._events) == 1
+
+    try:
+        _PrincipalRateLimiter(limit=1, window_seconds=10, max_keys=0)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("zero identity capacity must be rejected")
+
+
 def test_oversized_request_is_rejected_before_route_authentication():
     """Reject a declared oversized body before parsing or route authentication."""
     client, _ = make_client()

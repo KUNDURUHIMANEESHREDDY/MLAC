@@ -97,22 +97,51 @@ class RequestBodyLimitMiddleware:
 class _PrincipalRateLimiter:
     """Small process-local sliding-window limiter for the localhost API."""
 
-    def __init__(self, *, limit: int, window_seconds: float):
-        """Configure a positive request count and time window."""
-        if isinstance(limit, bool) or limit < 1 or window_seconds <= 0:
-            raise ValueError("rate limit and window must be positive")
+    def __init__(self, *, limit: int, window_seconds: float, max_keys: int = 4096):
+        """Configure request limits and a hard bound on tracked identities."""
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or limit < 1
+            or isinstance(max_keys, bool)
+            or not isinstance(max_keys, int)
+            or max_keys < 1
+            or isinstance(window_seconds, bool)
+            or window_seconds <= 0
+        ):
+            raise ValueError("rate limit, key capacity, and window must be positive")
         self.limit = limit
         self.window_seconds = window_seconds
+        self.max_keys = max_keys
         self._events: dict[str, deque[float]] = {}
         self._lock = Lock()
 
     def check(self, key: str) -> None:
-        """Record one request or raise with the remaining retry delay."""
+        """Record one request or fail closed when the bounded identity table is full."""
         now = time.monotonic()
         with self._lock:
-            events = self._events.setdefault(key, deque())
-            while events and now - events[0] >= self.window_seconds:
-                events.popleft()
+            events = self._events.get(key)
+            if events is not None:
+                while events and now - events[0] >= self.window_seconds:
+                    events.popleft()
+                if not events:
+                    del self._events[key]
+                    events = None
+
+            if events is None:
+                if len(self._events) >= self.max_keys:
+                    # Reclaim only identities whose entire window has expired. Never
+                    # evict an active identity, which would reset its rate allowance.
+                    for existing_key, existing_events in tuple(self._events.items()):
+                        if not existing_events or now - existing_events[-1] >= self.window_seconds:
+                            del self._events[existing_key]
+                if len(self._events) >= self.max_keys:
+                    # A full table must not turn into unbounded memory growth or
+                    # silently evict an active principal to admit a new one.
+                    raise RuntimeError(str(max(1, int(self.window_seconds))))
+                events = deque()
+                self._events[key] = events
+
             if len(events) >= self.limit:
                 retry_after = max(1, int(self.window_seconds - (now - events[0])))
                 raise RuntimeError(str(retry_after))
@@ -175,6 +204,8 @@ def create_app(
     rate_window_seconds: float = 60,
     pre_auth_rate_limit: int = 120,
     pre_auth_window_seconds: float = 60,
+    rate_limit_max_keys: int = 4096,
+    pre_auth_max_keys: int = 1024,
     max_body_bytes: int = _MAX_REQUEST_BODY_BYTES,
 ) -> Any:
     """Create an API that resolves every non-health request to an OIDC principal."""
@@ -199,10 +230,15 @@ def create_app(
         jwks_client = PyJWKClient(configured_jwks_url, cache_keys=True, timeout=5)
 
     auth_configured = bool(jwks_client is not None and configured_issuer and configured_audience)
-    principal_rate_limiter = _PrincipalRateLimiter(limit=rate_limit, window_seconds=rate_window_seconds)
+    principal_rate_limiter = _PrincipalRateLimiter(
+        limit=rate_limit,
+        window_seconds=rate_window_seconds,
+        max_keys=rate_limit_max_keys,
+    )
     peer_rate_limiter = _PrincipalRateLimiter(
         limit=pre_auth_rate_limit,
         window_seconds=pre_auth_window_seconds,
+        max_keys=pre_auth_max_keys,
     )
     bearer = HTTPBearer(auto_error=False)
     app = FastAPI(

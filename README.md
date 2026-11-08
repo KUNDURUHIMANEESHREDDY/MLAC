@@ -97,7 +97,7 @@ The pipeline can authorize only a candidate operation. It does not deploy or pro
 - Worker reports are trusted only to the extent that the reviewed, digest-pinned worker image and runtime are trusted.
 - Docker is not a complete defense against a compromised host, kernel, daemon, or runtime. Use a dedicated worker VM/host and stronger isolation for hostile code.
 - The optional API requires OIDC JWT authentication and issuer/subject ownership checks for every non-health route. Request bodies are capped at 1 MiB; pre-authentication requests are limited per peer before JWKS resolution, and authenticated principals have a separate process-local limit. The CLI disables proxy-header trust and rejects non-loopback binds.
-- The API registry and both rate limiters remain process-local and non-durable; they do not coordinate across workers. Durable tenant-scoped storage, transactional migrations, distributed rate limiting, backup/restore, TLS gateway deployment, and deployed acceptance remain release blockers.
+- The API registry and both rate limiters remain process-local and non-durable; they do not coordinate across workers. Each limiter has a bounded identity table, reclaims only expired windows, and fails closed rather than evicting an active principal when capacity is exhausted. Durable tenant-scoped storage, transactional migrations, distributed rate limiting, backup/restore, TLS gateway deployment, and deployed acceptance remain release blockers.
 - Trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
 - Host-side sandbox output collection uses descriptor-relative no-follow traversal and fails closed without POSIX openat/O_NOFOLLOW support; native Windows candidate evaluation is not yet supported.
 
