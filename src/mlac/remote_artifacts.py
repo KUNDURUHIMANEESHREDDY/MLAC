@@ -5,6 +5,19 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+
+def _utc_datetime(value: datetime | str) -> datetime:
+    """Parse an aware timestamp and normalize it to UTC."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("retention timestamp is invalid") from exc
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("retention timestamp must be timezone-aware")
+    return value.astimezone(timezone.utc)
+
+
 @dataclass(frozen=True)
 class RemoteArtifact:
     sha256: str
@@ -53,10 +66,8 @@ class S3ObjectLockArtifactStore:
             raise TypeError("artifact data must be bytes")
         digest, key = hashlib.sha256(data).hexdigest(), None
         key = self._key(digest)
-        now = self.clock()
-        if now.tzinfo is None:
-            raise ValueError("clock must return a timezone-aware datetime")
-        retain_until = now.astimezone(timezone.utc) + timedelta(days=self.retention_days)
+        now = _utc_datetime(self.clock())
+        retain_until = now + timedelta(days=self.retention_days)
         created_new = True
         try:
             response = self.client.put_object(
@@ -69,9 +80,12 @@ class S3ObjectLockArtifactStore:
             if status != 412:
                 raise
             created_new = False
-            if self.get_bytes(digest) != data:
+            existing_head = self.client.head_object(Bucket=self.bucket, Key=key)
+            version_id = existing_head.get("VersionId")
+            if not version_id:
+                raise RuntimeError("existing object has no version ID") from exc
+            if self.get_bytes(digest, version_id=version_id) != data:
                 raise RuntimeError("content-address collision or corrupted remote object") from exc
-            version_id = self.client.head_object(Bucket=self.bucket, Key=key).get("VersionId")
         if not version_id:
             raise RuntimeError("object store did not return a version ID")
         head = self.client.head_object(Bucket=self.bucket, Key=key, VersionId=version_id)
@@ -79,11 +93,11 @@ class S3ObjectLockArtifactStore:
             raise RuntimeError("remote object metadata digest mismatch")
         if head.get("ObjectLockMode") != "COMPLIANCE":
             raise RuntimeError("remote object is not protected by COMPLIANCE retention")
-        actual = head.get("ObjectLockRetainUntilDate")
-        if actual is None or (actual < retain_until and created_new) or (not created_new and actual <= now):
+        actual = _utc_datetime(head.get("ObjectLockRetainUntilDate"))
+        if (created_new and actual < retain_until) or (not created_new and actual <= now):
             raise RuntimeError("remote object retention is shorter than requested or has expired")
         return RemoteArtifact(digest, len(data), self.bucket, key, version_id,
-                              actual.astimezone(timezone.utc).isoformat(), "COMPLIANCE")
+                              actual.isoformat(), "COMPLIANCE")
 
     def get_bytes(self, digest: str, *, version_id: str | None = None) -> bytes:
         args = {"Bucket": self.bucket, "Key": self._key(digest)}
@@ -95,9 +109,20 @@ class S3ObjectLockArtifactStore:
         return data
 
     def verify(self, artifact: RemoteArtifact) -> bool:
-        if artifact.bucket != self.bucket or artifact.key != self._key(artifact.sha256):
+        if (artifact.bucket != self.bucket or artifact.key != self._key(artifact.sha256)
+                or not artifact.version_id):
             return False
-        data = self.get_bytes(artifact.sha256, version_id=artifact.version_id)
-        head = self.client.head_object(Bucket=self.bucket, Key=artifact.key, VersionId=artifact.version_id)
-        return (len(data) == artifact.size_bytes and head.get("ObjectLockMode") == "COMPLIANCE"
-                and head.get("Metadata", {}).get("sha256") == artifact.sha256)
+        try:
+            expected_retention = _utc_datetime(artifact.retention_until)
+            data = self.get_bytes(artifact.sha256, version_id=artifact.version_id)
+            head = self.client.head_object(
+                Bucket=self.bucket, Key=artifact.key, VersionId=artifact.version_id)
+            actual_retention = _utc_datetime(head.get("ObjectLockRetainUntilDate"))
+        except (ValueError, KeyError, TypeError):
+            return False
+        return (
+            len(data) == artifact.size_bytes
+            and head.get("ObjectLockMode") == "COMPLIANCE"
+            and head.get("Metadata", {}).get("sha256") == artifact.sha256
+            and actual_retention == expected_retention
+        )
