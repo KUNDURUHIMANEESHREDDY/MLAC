@@ -41,9 +41,9 @@ class DesignConstraints:
     search_evaluation_limit: int = 10000
 
     def __post_init__(self) -> None:
-        if isinstance(self.input_size, bool) or self.input_size < 1:
+        if type(self.input_size) is not int or self.input_size < 1:
             raise ValueError("input_size must be a positive integer")
-        if isinstance(self.output_size, bool) or self.output_size < 1:
+        if type(self.output_size) is not int or self.output_size < 1:
             raise ValueError("output_size must be a positive integer")
         if not self.hidden_sizes or any(
             isinstance(width, bool) or not isinstance(width, int) or width < 1
@@ -52,6 +52,8 @@ class DesignConstraints:
             raise ValueError("hidden_sizes must contain positive integers")
         if len(set(self.hidden_sizes)) != len(self.hidden_sizes):
             raise ValueError("hidden_sizes must be unique")
+        if type(self.min_layers) is not int or type(self.max_layers) is not int:
+            raise ValueError("layer bounds must be integers")
         if self.min_layers < 1 or self.max_layers < self.min_layers:
             raise ValueError("layer bounds must satisfy 1 <= min_layers <= max_layers")
         if self.max_layers > 8:
@@ -62,14 +64,18 @@ class DesignConstraints:
             raise ValueError(
                 f"allowed_activations must be selected from {sorted(_SUPPORTED_ACTIVATIONS)}"
             )
-        if self.max_parameters is not None and self.max_parameters < 1:
-            raise ValueError("max_parameters must be positive")
-        if self.target_parameters is not None and self.target_parameters < 1:
-            raise ValueError("target_parameters must be positive")
-        if self.candidate_limit < 1 or self.candidate_limit > 10000:
-            raise ValueError("candidate_limit must be between 1 and 10000")
-        if self.search_evaluation_limit < 1 or self.search_evaluation_limit > 100000:
-            raise ValueError("search_evaluation_limit must be between 1 and 100000")
+        if self.max_parameters is not None and (
+            type(self.max_parameters) is not int or self.max_parameters < 1
+        ):
+            raise ValueError("max_parameters must be a positive integer")
+        if self.target_parameters is not None and (
+            type(self.target_parameters) is not int or self.target_parameters < 1
+        ):
+            raise ValueError("target_parameters must be a positive integer")
+        if type(self.candidate_limit) is not int or not 1 <= self.candidate_limit <= 10000:
+            raise ValueError("candidate_limit must be an integer between 1 and 10000")
+        if type(self.search_evaluation_limit) is not int or not 1 <= self.search_evaluation_limit <= 100000:
+            raise ValueError("search_evaluation_limit must be an integer between 1 and 100000")
         if not isinstance(self.dtype, str) or self.dtype.lower() not in {
             "fp16", "bf16", "fp32", "fp64"
         }:
