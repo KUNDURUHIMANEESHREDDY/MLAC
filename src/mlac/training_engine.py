@@ -7,11 +7,14 @@ is evaluated once after validation-based checkpoint selection.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
+import tempfile
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
+from pathlib import Path
+from typing import Any, Mapping, Protocol, Sequence
 
 try:
     import torch
@@ -368,3 +371,68 @@ class TrainingEngine:
             heldout_loss=heldout_loss, heldout_accuracy=heldout_accuracy,
             heldout_examples=dataset.heldout.inputs.shape[0], lora_targets=tuple(target_names),
         )
+
+
+
+class TrainingCandidateBuilder(Protocol):
+    """Trusted adapter that writes a worker-compatible checkpoint and manifest."""
+
+    def build(self, *, result: TrainingResult, output_dir: str | Path) -> None: ...
+
+
+class TrainingPromotionWorkflow:
+    """Submit a trained checkpoint to the existing signed candidate pipeline.
+
+    The adapter is model-family specific and must produce the exact fixed-worker
+    candidate bundle. The pipeline—not this workflow—performs held-out worker
+    evaluation, signature verification, policy gates, governance and ledgering.
+    """
+
+    def __init__(self, *, pipeline: Any, candidate_builder: TrainingCandidateBuilder):
+        if not callable(getattr(pipeline, "run", None)):
+            raise TypeError("pipeline must expose the CandidateEvaluationPipeline run contract")
+        if not callable(getattr(candidate_builder, "build", None)):
+            raise TypeError("candidate_builder must expose build(result, output_dir)")
+        self.pipeline = pipeline
+        self.candidate_builder = candidate_builder
+
+    def evaluate(self, *, result: TrainingResult, trusted_evaluation_dir: str | Path,
+                 model_id: str, candidate_id: str) -> Any:
+        if not isinstance(result, TrainingResult):
+            raise TypeError("result must be a TrainingResult")
+        if not model_id.strip() or not candidate_id.strip():
+            raise ValueError("model_id and candidate_id must be non-empty")
+        with tempfile.TemporaryDirectory(prefix="mlac-trained-candidate-") as temporary:
+            candidate_dir = Path(temporary)
+            self.candidate_builder.build(result=result, output_dir=candidate_dir)
+            expected = {"candidate.pt", "candidate_manifest.json"}
+            actual = {path.name for path in candidate_dir.iterdir()}
+            if actual != expected:
+                raise ValueError(f"candidate builder must create exactly {sorted(expected)}")
+            for name in expected:
+                path = candidate_dir / name
+                if path.is_symlink() or not path.is_file() or path.stat().st_size > 512 * 1024 * 1024:
+                    raise ValueError(f"candidate artifact {name!r} must be a regular file within 512 MiB")
+            manifest = json.loads((candidate_dir / "candidate_manifest.json").read_text(encoding="utf-8"))
+            if not isinstance(manifest, dict):
+                raise ValueError("candidate_manifest.json must contain a JSON object")
+            evidence = {
+                "schema_version": 1,
+                "training": result.summary(),
+                "history": [
+                    {"epoch": item.epoch, "train_loss": item.train_loss,
+                     "validation_loss": item.validation_loss, "learning_rate": item.learning_rate}
+                    for item in result.history
+                ],
+            }
+            (candidate_dir / "training-evidence.json").write_text(
+                json.dumps(evidence, sort_keys=True, separators=(",", ":"), allow_nan=False),
+                encoding="utf-8",
+            )
+            return self.pipeline.run(
+                candidate_dir=candidate_dir,
+                trusted_evaluation_dir=trusted_evaluation_dir,
+                model_id=model_id,
+                candidate_id=candidate_id,
+                operation="training:" + result.mode,
+            )
