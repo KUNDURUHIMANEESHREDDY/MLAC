@@ -38,6 +38,8 @@ Optional API: install `pip install -e ".[api]"` for local use; production Postgr
 
 The supported API topology uses the pinned GHCR image, Caddy-managed HTTPS, a persistent PostgreSQL volume, and internal Redis-backed shared rate limiting. Configure OIDC, domain, image digest, and backup bucket before startup. Follow [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md) and review [docs/RELEASE_1_0_0.md](docs/RELEASE_1_0_0.md). This topology is not HA and is not considered production-deployed until the target-host acceptance checklist and restore drill pass.
 
+For an isolated SQLite backup restore that never overwrites an existing destination, see [docs/RESTORE_DRILL.md](docs/RESTORE_DRILL.md). PostgreSQL restore remains an operator-run drill against a disposable instance; neither path is evidence of production recovery until the target deployment is tested.
+
 ## Master Intelligence planning
 
 The proposal-only planning engine works without a model-provider API:
