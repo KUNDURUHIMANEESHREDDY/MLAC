@@ -44,9 +44,10 @@ batch size (1–1024), patience (1–20), total update steps, learning rate,
 weight decay, gradient clipping, seed, temperature, distillation alpha, total update steps, model parameters,
 and per-split tensor bytes. Supported schedulers are none, cosine, and step.
 CPU tensors and deterministic
-PyTorch algorithms are used. The result records per-epoch training/validation
-loss and learning rate, selected epoch, checkpoint SHA-256, dataset SHA-256,
-trainable/total parameter counts, and held-out loss/accuracy.
+PyTorch algorithms are used. The result records the full optimizer/training configuration, teacher checkpoint
+SHA-256 (for distillation), dataset revision and SHA-256, per-epoch
+training/validation loss and learning rate, selected epoch, checkpoint
+SHA-256, trainable/total parameter counts, and held-out loss/accuracy.
 
 Example:
 
