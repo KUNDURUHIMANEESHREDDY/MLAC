@@ -6,13 +6,13 @@ MLAC separates model metadata, supported transformations, evaluation evidence, e
 - **Inspector:** reads an already-instantiated, trusted PyTorch module; does not load checkpoints or run a forward pass.
 - **Registry:** in-memory model metadata store.
 - **Mutation:** explicit dropout-configuration update on an IR snapshot, not a live graph or weight rewrite.
-- **Architecture engineering:** MLAC's own PyTorch TransformerBlock supports head pruning with retained-weight migration.
+- **Architecture engineering:** the transactional Modification Engine supports isolated attention pruning/resizing, MLP hidden-width and activation edits, dimension-checked layer-stack changes, and top-k MoE conversion. The source model is not mutated.
 - **Benchmark and evaluation:** baseline/candidate measurements, finite-output and shape checks, latency/parameter budgets, and mandatory task-quality gates.
 - **Experiment ledger:** SQLite stores immutable evaluation scorecards and workflow outcomes.
 - **Artifact registry:** content-addressed SHA-256 blobs with SQLite evaluation associations, integrity checks, and one-time worker-attestation nonce records.
 - **Worker identity:** Ed25519 result signatures bind canonical report bytes, configured worker identity/image claim, and controller-recomputed input artifact hashes. Public keys are pinned in controller trust configuration; private keys are mounted read-only only into the fixed worker.
 - **Master Intelligence:** normalizes objectives, diagnoses architecture metadata and ranks validated proposal-only experiment plans. Its optional OpenAI Responses backend returns schema-constrained suggestions that remain untrusted and allowlisted.
-- **Intelligence workflow:** connects a validated plan to the supported candidate builder and existing candidate evaluation pipeline; the LLM does not execute code, control the worker, or authorize promotion.
+- **Intelligence workflow:** connects locally validated structural plans to the Modification Engine, emits a candidate checkpoint plus an operation manifest, and sends both to the fixed worker. The worker independently reconstructs the candidate from the trusted baseline before strict state loading. The LLM does not execute code, control the worker, or authorize promotion.
 - **Evolution:** records hypotheses as proposals; it does not independently execute generated code or promote deployments.
 - **Safety kernel:** integrity-checks trusted guardrails, permits only monotonic tightening, and requires externally pinned policy digests and scoped operator approval for production authorization.
 - **Sandbox runner:** digest-pinned Docker execution with read-only candidate input, separate output, disabled network, dropped capabilities, non-root identity, and resource/time controls.
