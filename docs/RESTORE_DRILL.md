@@ -44,10 +44,12 @@ PY
 
 Provision a **new, empty disposable PostgreSQL database** on a test instance. The database name must begin with `mlac_restore_drill_`; the restore utility does not create or drop databases. Keep the source archive immutable and obtain its expected SHA-256 from trusted object metadata.
 
-Pass the disposable target DSN through the environment so it does not appear in shell history or process arguments:
+Read the disposable target DSN without echoing it or placing it in shell history. Do not enable shell tracing (set -x) while handling the credential:
 
 ```bash
-export MLAC_RESTORE_DATABASE_URL='postgresql://<user>:<password>@<host>:5432/mlac_restore_drill_<unique-id>?sslmode=require'
+read -r -s -p "Disposable PostgreSQL DSN: " MLAC_RESTORE_DATABASE_URL
+printf '\n'
+export MLAC_RESTORE_DATABASE_URL
 python -m scripts.restore_postgres_backup \
   ./downloaded/api-state.dump \
   --sha256 '<trusted-64-character-sha256>'
