@@ -106,7 +106,7 @@ class CallableReasoningBackend:
 class MasterIntelligenceEngine:
     """Turns model goals into ranked, constrained, auditable experiment proposals."""
 
-    ALLOWED_OPERATIONS = {"profile_model", "prune_attention_heads", "resize_attention_heads", "resize_mlp_hidden", "set_mlp_activation", "convert_mlp_to_moe"}
+    ALLOWED_OPERATIONS = {"profile_model", "prune_attention_heads", "resize_attention_heads", "resize_mlp_hidden", "set_mlp_activation", "convert_mlp_to_moe", "prune_unstructured", "prune_structured", "fake_quantize_int8", "inject_lora"}
     MEASUREMENTS = ("task_quality", "latency", "parameter_count", "peak_memory", "finite_outputs")
 
     def __init__(self, *, backend: ReasoningBackend | None = None,
@@ -221,6 +221,30 @@ class MasterIntelligenceEngine:
                                                    "Latency or memory does not improve beyond measurement noise"],
                         "risk": "medium", "estimated_value": 0.78, "feasibility": 0.72,
                     })
+        if objective.primary_metric in {"parameters", "memory"} and any(
+            "mlp" in item.name.lower() or "feedforward" in item.name.lower()
+            for item in architecture.components
+        ):
+            plans.extend([
+                {
+                    "operation": "prune_unstructured",
+                    "parameters": {"target": "mlp.0.weight", "amount": 0.10},
+                    "hypothesis": "Magnitude pruning of the first MLP projection may reduce effective weight density.",
+                    "rationale": "The inspected model exposes an MLP component; candidate quality and actual runtime benefit must be measured.",
+                    "expected_effect": {"parameters": "parameter tensor shape unchanged", "memory": "sparsity increases", "quality": "must_be_measured"},
+                    "falsification_criteria": ["Task quality violates the configured acceptance threshold", "The measured runtime or storage metric does not improve"],
+                    "risk": "medium", "estimated_value": 0.62, "feasibility": 0.90,
+                },
+                {
+                    "operation": "fake_quantize_int8",
+                    "parameters": {"target": "mlp.0.weight"},
+                    "hypothesis": "Symmetric INT8 fake quantization may reduce weight precision cost with bounded numerical error.",
+                    "rationale": "The fixed worker can compare the quantized-dequantized candidate against the trusted baseline.",
+                    "expected_effect": {"memory": "estimated INT8 representation size decreases", "quality": "must_be_measured"},
+                    "falsification_criteria": ["Task quality violates the configured acceptance threshold", "Quantization error or latency exceeds the configured budget"],
+                    "risk": "medium", "estimated_value": 0.68, "feasibility": 0.94,
+                },
+            ])
         return plans
 
     def _validate_proposal(
@@ -318,6 +342,50 @@ class MasterIntelligenceEngine:
             ):
                 raise ValueError(f"proposal {index}: no inspected MLP component is available")
             params = {"num_experts": experts, "top_k": top_k, "expert_noise_std": float(noise)}
+        elif operation in {"prune_unstructured", "fake_quantize_int8"}:
+            expected_keys = {"target", "amount"} if operation == "prune_unstructured" else {"target"}
+            if set(params) != expected_keys:
+                raise ValueError(f"proposal {index}: {operation} parameters are invalid")
+            target = params.get("target")
+            allowed_targets = {
+                "attention.qkv.weight", "attention.out_proj.weight",
+                "mlp.0.weight", "mlp.0.bias", "mlp.2.weight", "mlp.2.bias",
+            }
+            if not isinstance(target, str) or target not in allowed_targets:
+                raise ValueError(f"proposal {index}: weight target is not in the fixed TransformerBlock allowlist")
+            if operation == "prune_unstructured":
+                amount = params["amount"]
+                if isinstance(amount, bool) or not isinstance(amount, (int, float)) or not math.isfinite(amount) or not 0.0 < amount <= 0.5:
+                    raise ValueError(f"proposal {index}: pruning amount must be in (0, 0.5]")
+                params = {"target": target, "amount": float(amount)}
+            else:
+                params = {"target": target}
+        elif operation == "prune_structured":
+            if set(params) != {"target", "dimension", "indices"}:
+                raise ValueError(f"proposal {index}: prune_structured requires target, dimension, and indices")
+            target, dimension, indices = params["target"], params["dimension"], params["indices"]
+            allowed_targets = {"attention.qkv.weight", "attention.out_proj.weight", "mlp.0.weight", "mlp.2.weight"}
+            if not isinstance(target, str) or target not in allowed_targets:
+                raise ValueError(f"proposal {index}: structured-pruning target is not allowlisted")
+            if dimension not in {"input", "output"} or not isinstance(indices, list) or not indices:
+                raise ValueError(f"proposal {index}: structured pruning requires input/output dimension and non-empty indices")
+            if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in indices) or len(set(indices)) != len(indices):
+                raise ValueError(f"proposal {index}: structured pruning indices must be unique non-negative integers")
+            params = {"target": target, "dimension": dimension, "indices": indices}
+        elif operation == "inject_lora":
+            if set(params) - {"target", "rank", "alpha", "dropout"} or not {"target", "rank"}.issubset(params):
+                raise ValueError(f"proposal {index}: inject_lora requires target and rank")
+            target, rank = params["target"], params["rank"]
+            alpha, dropout = params.get("alpha", rank), params.get("dropout", 0.0)
+            if target not in {"attention.qkv", "attention.out_proj", "mlp.0", "mlp.2"}:
+                raise ValueError(f"proposal {index}: LoRA target is not in the fixed TransformerBlock allowlist")
+            if isinstance(rank, bool) or not isinstance(rank, int) or not 1 <= rank <= 64:
+                raise ValueError(f"proposal {index}: LoRA rank must be an integer from 1 to 64")
+            if isinstance(alpha, bool) or not isinstance(alpha, (int, float)) or not math.isfinite(alpha) or not 0 < alpha <= 256:
+                raise ValueError(f"proposal {index}: LoRA alpha must be in (0, 256]")
+            if isinstance(dropout, bool) or not isinstance(dropout, (int, float)) or not math.isfinite(dropout) or not 0 <= dropout < 1:
+                raise ValueError(f"proposal {index}: LoRA dropout must be in [0, 1)")
+            params = {"target": target, "rank": rank, "alpha": float(alpha), "dropout": float(dropout)}
         else:
             allowed = {"warmup_iterations", "measurement_iterations"}
             if set(params) - allowed:
