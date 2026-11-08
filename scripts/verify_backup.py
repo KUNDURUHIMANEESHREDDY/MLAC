@@ -19,26 +19,39 @@ _POSTGRES_CUSTOM_SIGNATURE = b"PGDMP"
 _READ_CHUNK_BYTES = 1024 * 1024
 
 
-def _regular_file_identity(path: Path) -> tuple[int, int]:
+def _identity(metadata: os.stat_result) -> tuple[int, ...]:
+    """Capture file identity and mutation-sensitive metadata from one stat result."""
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _regular_file_identity(path: Path) -> tuple[int, ...]:
     """Reject symlinks and non-regular backup paths."""
+
     try:
         metadata = path.lstat()
     except OSError as exc:
         raise ValueError(f"cannot inspect backup file: {exc}") from exc
     if not stat.S_ISREG(metadata.st_mode):
         raise ValueError("backup must be a regular, non-symlink file")
-    return metadata.st_dev, metadata.st_ino
+    return _identity(metadata)
 
 
-def _sha256(path: Path, expected_identity: tuple[int, int]) -> str:
-    """Hash the backup in bounded memory and reject path replacement."""
+def _sha256(path: Path, expected_identity: tuple[int, ...]) -> str:
+    """Hash the backup in bounded memory and reject replacement or in-place mutation."""
+
     digest = hashlib.sha256()
     try:
         with path.open("rb") as backup:
             metadata = os.fstat(backup.fileno())
             if not stat.S_ISREG(metadata.st_mode):
                 raise ValueError("backup must be a regular file")
-            if (metadata.st_dev, metadata.st_ino) != expected_identity:
+            if _identity(metadata) != expected_identity:
                 raise ValueError("backup changed while it was being opened")
             for chunk in iter(lambda: backup.read(_READ_CHUNK_BYTES), b""):
                 digest.update(chunk)
@@ -63,7 +76,7 @@ def _detect_format(path: Path) -> str:
     raise ValueError("unsupported backup signature; expected SQLite or PostgreSQL custom format")
 
 
-def _verify_sqlite(path: Path, expected_identity: tuple[int, int]) -> None:
+def _verify_sqlite(path: Path, expected_identity: tuple[int, ...]) -> None:
     """Run SQLite integrity checks without allowing writes or trusted schema code."""
     if _regular_file_identity(path) != expected_identity:
         raise ValueError("backup path changed before SQLite verification")
