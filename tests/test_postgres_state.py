@@ -13,7 +13,11 @@ from mlac.registry import ModelRegistry
 
 def _architecture():
     """Build a minimal architecture for state-store integration coverage."""
-    return Architecture("postgres-test", "mlp", components=(Component("drop", "Dropout", {"p": 0.1}),))
+    return Architecture(
+        "postgres-test",
+        "mlp",
+        components=(Component("drop", "Dropout", {"p": 0.1}),),
+    )
 
 
 def test_postgres_state_persists_and_scopes_models_and_proposals():
@@ -49,9 +53,10 @@ def test_postgres_state_persists_and_scopes_models_and_proposals():
     assert reopened_registry.get(alice.model_id) == alice
     assert reopened_registry.list(owner=owner) == [alice]
     assert reopened_registry.list(owner=other_owner) == [bob]
-    assert [item["proposal_id"] for item in reopened_controller.list_proposals(
+    scoped = reopened_controller.list_proposals(
         owner=owner, model_ids={alice.model_id}
-    )] == [proposal.proposal_id]
+    )
+    assert [item["proposal_id"] for item in scoped] == [proposal.proposal_id]
     assert reopened_controller.list_proposals(owner=owner, model_ids=set()) == []
     assert reopened_controller.list_proposals(owner=owner, model_ids={bob.model_id}) == []
     reopened.health_check()
