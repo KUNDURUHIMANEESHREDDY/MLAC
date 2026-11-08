@@ -89,7 +89,7 @@ def _execute(
     raise ValueError(f"unsupported weight transformation operation: {operation!r}")
 
 
-def _validate_parameter_shape(name: str, value: Tensor, architecture: Architecture,
+def _validate_parameter_shape(name: str, value: Tensor,
                              mappings: Mapping[str, Any], tensor_specs: Mapping[str, Any]) -> None:
     mapping = mappings.get(name)
     if mapping is None:
@@ -138,7 +138,7 @@ def apply_weight_transformations(
             source = working[source_name]
             if not isinstance(source, torch.Tensor):
                 raise TypeError(f"transformation source {source_name!r} is not a torch.Tensor")
-            _validate_parameter_shape(source_name, source, architecture, mappings, tensor_specs)
+            _validate_parameter_shape(source_name, source, mappings, tensor_specs)
         outputs = _execute(requirement, working)
         if len(outputs) != len(requirement.target_parameters):
             raise ValueError(
@@ -148,7 +148,7 @@ def apply_weight_transformations(
         for target_name, output in zip(requirement.target_parameters, outputs):
             if not isinstance(output, torch.Tensor):
                 raise TypeError(f"transformation target {target_name!r} is not a torch.Tensor")
-            _validate_parameter_shape(target_name, output, architecture, mappings, tensor_specs)
+            _validate_parameter_shape(target_name, output, mappings, tensor_specs)
             working[target_name] = output.clone()
 
         records.append(TransformationRecord(
