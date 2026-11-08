@@ -142,7 +142,8 @@ can select `EvaluationPolicy(quality_metric="perplexity_score")` or
 baseline and candidate reports. Do not compare candidates with different
 tokenizers, dataset revisions, prompt formats, or manifest settings.
 
-Example controller setup:
+Example controller setup (load `trusted_dataset_signers` from the operator's
+public-key trust store, separately from worker signing keys):
 
     from mlac.evaluation import EvaluationPolicy
     from mlac.pipeline import CandidateEvaluationPipeline
