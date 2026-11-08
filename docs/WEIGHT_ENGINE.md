@@ -55,6 +55,29 @@ shape and dtype equality. It does not silently transpose, reshape, cast, or
 fuzzy-match checkpoint keys. Strict mode rejects missing or unmapped target
 tensors; non-strict mode reports skipped mappings and missing targets.
 
+## Master Intelligence and trusted-worker integration
+
+The fixed TransformerBlock workflow exposes four executable weight operations:
+`prune_unstructured`, `prune_structured`, `fake_quantize_int8`, and
+`inject_lora`. Master Intelligence validates a fixed target allowlist and
+bounded parameters. The controller builds the candidate transactionally from
+the trusted baseline; the worker independently repeats the operation from the
+manifest and baseline before strict-loading the checkpoint. The candidate
+continues through the existing signed evaluation, policy gates, governance,
+artifact registry, and experiment ledger.
+
+The fixed worker supports parameter paths beneath `attention.qkv`,
+`attention.out_proj`, `mlp.0`, and `mlp.2`; LoRA wraps only those Linear
+modules. This is a deliberately narrow adapter, not a generic arbitrary-model
+mutation interface.
+
+Distillation remains a loss primitive and is not yet an executable Master
+Intelligence or worker operation. It requires the Training Engine to supply
+teacher/student loading, dataset controls, optimizer/scheduler, training,
+checkpoint selection, and independently evaluated output before it can enter
+the candidate pipeline. Checkpoint migration remains an explicit library API,
+not a candidate manifest operation.
+
 ## Important limitations
 
 - INT8 is currently a simulated/fake quantization transform. Parameters remain
