@@ -30,6 +30,20 @@ sharing the same database. PostgreSQL credentials must be supplied through a sec
 manager or private environment file; use TLS (`sslmode=require`) for remote
 managed databases. Do not publish the database port.
 
+## Upgrade from a SQLite deployment
+
+Stop the old API, take a protected SQLite backup, and provision an empty
+PostgreSQL database. Set MLAC_MIGRATION_SQLITE_PATH to the absolute path of the
+SQLite file and MLAC_API_DATABASE_URL to the PostgreSQL DSN, then run:
+
+    python scripts/migrate_sqlite_to_postgres.py
+
+The migration refuses a non-empty target, copies models and proposals inside one
+PostgreSQL transaction, verifies the migrated identifier sets before commit,
+and leaves the source SQLite file unchanged. Run the API with PostgreSQL
+configured only after the migration reports success. Keep the original backup
+until the PostgreSQL restore drill and tenant-isolation checks pass.
+
 ## SQLite development backend
 
 Schema version 1 contains:
