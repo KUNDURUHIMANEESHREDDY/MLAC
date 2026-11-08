@@ -66,3 +66,17 @@ def test_pipeline_worker_entrypoint_is_trusted_configuration(tmp_path):
     with pytest.raises(ValueError,match="absolute trusted image path"):
         CandidateEvaluationPipeline(runner=FakeRunner(report()),image="worker@sha256:"+"a"*64,
             store=ExperimentStore(tmp_path/"ledger.sqlite"),worker_entrypoint="candidate.py")
+
+def test_pipeline_allows_parameter_reduction_under_growth_budget(tmp_path):
+    runner=FakeRunner(report(params=80))
+    pipe=CandidateEvaluationPipeline(runner=runner,image="worker@sha256:"+"a"*64,
+        store=ExperimentStore(tmp_path/"ledger.sqlite"))
+    result=pipe.run(candidate_dir=tmp_path,model_id="base",candidate_id="smaller")
+    assert result.status=="candidate_authorized"
+    assert result.evaluation.parameter_growth_ratio < 0
+
+def test_report_rejects_boolean_schema_version():
+    bad=report()
+    bad["schema_version"]=True
+    with pytest.raises(ValueError,match="integer 1"):
+        evaluate_worker_report(bad)

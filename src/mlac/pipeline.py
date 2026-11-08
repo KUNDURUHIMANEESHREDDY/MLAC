@@ -76,8 +76,9 @@ def _quality(value: Any, label: str) -> dict[str,float]:
 def evaluate_worker_report(report: dict[str,Any], *, policy: EvaluationPolicy|None=None) -> EvaluationResult:
     policy=policy or EvaluationPolicy()
     expected={"schema_version","baseline","candidate","quality_baseline","quality_candidate"}
-    if not isinstance(report,dict) or report.get("schema_version") != 1:
-        raise ValueError("worker report schema_version must be 1")
+    if (not isinstance(report,dict) or isinstance(report.get("schema_version"),bool)
+            or report.get("schema_version") != 1):
+        raise ValueError("worker report schema_version must be integer 1")
     if set(report) != expected: raise ValueError(f"worker report fields must be exactly {sorted(expected)}")
     base=_benchmark(report["baseline"],"baseline")
     cand=_benchmark(report["candidate"],"candidate")
@@ -144,7 +145,7 @@ class CandidateEvaluationPipeline:
         if evaluation.promotion_eligible:
             try:
                 self.governance.authorize(target="candidate",operation=operation,
-                    parameter_growth_ratio=evaluation.parameter_growth_ratio)
+                    parameter_growth_ratio=max(0.0,evaluation.parameter_growth_ratio))
                 authorized=True
                 reason="Candidate operation authorized by controller governance"
             except (PermissionError,ValueError) as exc: reason=str(exc)
