@@ -12,7 +12,7 @@ from typing import Any, Mapping, Sequence
 
 try:
     import torch
-    from torch import Tensor, nn
+    from torch import nn
 except ImportError as exc:  # pragma: no cover - optional dependency
     raise ImportError("Architecture modification requires 'pip install mlac[torch]'") from exc
 
