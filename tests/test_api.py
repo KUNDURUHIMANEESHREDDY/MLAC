@@ -297,3 +297,25 @@ def test_intelligence_planning_route_requires_identity_and_returns_proposals():
     assert response.status_code == 200
     assert response.json()["planner"] == "rules"
     assert response.json()["plans"]
+
+
+def test_reasoning_provider_factory_selects_compatible_adapter(monkeypatch):
+    """Allow an operator to select a compatible hosted or self-hosted LLM endpoint."""
+    from mlac.api import _default_intelligence_engine
+
+    monkeypatch.setenv("MLAC_REASONING_PROVIDER", "openai-compatible")
+    monkeypatch.setenv("MLAC_CHAT_API_KEY", "test-secret")
+    monkeypatch.setenv("MLAC_CHAT_MODEL", "test-model")
+    monkeypatch.setenv("MLAC_CHAT_BASE_URL", "https://llm.example/v1")
+    engine = _default_intelligence_engine()
+    assert engine.backend.provider_name == "openai-compatible-chat-completions"
+    assert engine.backend.model_name == "test-model"
+
+
+def test_reasoning_provider_factory_rejects_unknown_provider(monkeypatch):
+    """Fail fast rather than silently selecting an unintended provider."""
+    from mlac.api import _default_intelligence_engine
+
+    monkeypatch.setenv("MLAC_REASONING_PROVIDER", "unknown-provider")
+    with pytest.raises(RuntimeError, match="MLAC_REASONING_PROVIDER"):
+        _default_intelligence_engine()
