@@ -210,7 +210,7 @@ class MasterIntelligenceEngine:
                     })
         return plans
 
-    def _validate_proposal(self, raw: Mapping[str, Any], objective: OptimizationObjective, index: int) -> ExperimentPlan:
+    def _validate_proposal(self, raw: Mapping[str, Any], objective: OptimizationObjective, architecture: Architecture, index: int) -> ExperimentPlan:
         operation = raw.get("operation")
         if operation not in self.ALLOWED_OPERATIONS:
             raise ValueError(f"proposal {index}: unsupported operation {operation!r}")
@@ -223,6 +223,19 @@ class MasterIntelligenceEngine:
                 raise ValueError(f"proposal {index}: pruning requires module_name and non-empty heads_to_prune")
             if any(isinstance(h, bool) or not isinstance(h, int) or h < 0 for h in heads):
                 raise ValueError(f"proposal {index}: head indices must be non-negative integers")
+            component = next((c for c in architecture.components if c.name == name), None)
+            if component is None or not ("attention" in component.kind.lower() or "attn" in component.name.lower()):
+                raise ValueError(f"proposal {index}: pruning target is not an inspected attention component")
+            head_count = component.config.get("num_heads")
+            if not isinstance(head_count, int) or any(h >= head_count for h in heads) or len(set(heads)) != len(heads) or len(set(heads)) >= head_count:
+                raise ValueError(f"proposal {index}: pruned head indices must be unique, in range, and leave at least one head")
+        if operation == "reduce_dropout":
+            name, probability = params.get("module_name"), params.get("p")
+            component = next((c for c in architecture.components if c.name == name), None)
+            if component is None or "dropout" not in component.kind.lower():
+                raise ValueError(f"proposal {index}: dropout target is not an inspected dropout component")
+            if isinstance(probability, bool) or not isinstance(probability, (int, float)) or not 0 <= probability <= 1:
+                raise ValueError(f"proposal {index}: dropout p must be between 0 and 1")
         for key in ("hypothesis", "rationale"):
             if not isinstance(raw.get(key), str) or not raw[key].strip():
                 raise ValueError(f"proposal {index}: {key} must be non-empty")
@@ -260,7 +273,7 @@ class MasterIntelligenceEngine:
             planner = "rules+llm"
         plans, seen = [], set()
         for index, raw in enumerate(raw_plans):
-            plan = self._validate_proposal(raw, goal, index)
+            plan = self._validate_proposal(raw, goal, arch, index)
             fingerprint = json.dumps([plan.operation, plan.parameters], sort_keys=True, default=str)
             if fingerprint not in seen:
                 plans.append(plan)
