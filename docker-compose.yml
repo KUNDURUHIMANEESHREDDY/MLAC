@@ -6,8 +6,6 @@ services:
     environment:
       MLAC_API_STATE_DB: /var/lib/mlac/api-state.sqlite3
       MLAC_RATE_LIMIT_REDIS_URL: ${MLAC_RATE_LIMIT_REDIS_URL:?Set a private Redis URL}
-    volumes:
-      - mlac-data:/var/lib/mlac
     expose:
       - "8000"
     networks:
@@ -15,7 +13,31 @@ services:
         ipv4_address: 172.30.0.3
       private: {}
     depends_on:
-      redis:
+      postgres:
+        condition: service_healthy
+      postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    user: postgres
+    environment:
+      POSTGRES_DB: mlac
+      POSTGRES_USER: mlac
+      POSTGRES_PASSWORD: ${MLAC_POSTGRES_PASSWORD:?Set a strong PostgreSQL password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlac -d mlac"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  redis:
         condition: service_healthy
     healthcheck:
       test:
@@ -89,7 +111,7 @@ services:
       - NET_BIND_SERVICE
 
 volumes:
-  mlac-data:
+  postgres-data:
   redis-data:
   caddy-data:
   caddy-config:
