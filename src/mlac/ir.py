@@ -116,7 +116,7 @@ class CompatibilityConstraint:
 class RuntimeRequirements:
     backend: str | None = None
     required_features: tuple[str, ...] = ()
-    allowed_dtypes: tuple[str, ...] = ()
+    required_dtypes: tuple[str, ...] = ()
     minimum_memory_bytes: int | None = None
     maximum_sequence_length: int | None = None
 
@@ -227,9 +227,15 @@ class Architecture:
                 missing = (set(item.source_parameters) | set(item.target_parameters)) - mapped_parameters
                 if missing:
                     errors.append(f"weight transformation references unmapped parameters: {', '.join(sorted(missing))}")
+        runtime_targets = {
+            "backend", "features", "supported_dtypes", "available_memory_bytes",
+            "maximum_sequence_length",
+        }
         for constraint in self.compatibility_constraints:
             if constraint.operator not in {"eq", "ne", "gte", "lte", "in", "contains"}:
                 errors.append(f"unsupported compatibility operator {constraint.operator!r}")
+            if constraint.target not in runtime_targets:
+                errors.append(f"unsupported runtime compatibility target {constraint.target!r}")
         return tuple(errors)
 
     def assert_valid(self) -> None:
@@ -274,7 +280,7 @@ class Architecture:
 
     def fingerprint(self) -> str:
         """Stable SHA-256 digest of the serialized architecture description."""
-        payload = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), default=list)
+        payload = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -289,10 +295,13 @@ def validate_compatibility(
     missing_features = set(requirements.required_features) - set(runtime.features)
     if missing_features:
         issues.append(f"runtime is missing features: {', '.join(sorted(missing_features))}")
-    if requirements.allowed_dtypes:
-        unsupported = set(requirements.allowed_dtypes) - set(runtime.supported_dtypes)
-        if unsupported:
-            issues.append(f"runtime does not support dtypes: {', '.join(sorted(unsupported))}")
+    required_dtypes = set(requirements.required_dtypes)
+    required_dtypes.update(
+        tensor.dtype for tensor in architecture.tensors if tensor.dtype != "unknown"
+    )
+    unsupported = required_dtypes - set(runtime.supported_dtypes)
+    if unsupported:
+        issues.append(f"runtime does not support dtypes: {', '.join(sorted(unsupported))}")
     if requirements.minimum_memory_bytes is not None:
         if runtime.available_memory_bytes is None or runtime.available_memory_bytes < requirements.minimum_memory_bytes:
             issues.append("runtime has insufficient or unknown available memory")
@@ -308,16 +317,25 @@ def validate_compatibility(
         "maximum_sequence_length": runtime.maximum_sequence_length,
     }
     for constraint in architecture.compatibility_constraints:
-        actual = values.get(constraint.target)
+        if constraint.target not in values or constraint.operator not in {"eq", "ne", "gte", "lte", "in", "contains"}:
+            continue  # Invalid declarations were already reported by structural validation.
+        actual = values[constraint.target]
         expected = constraint.value
-        passed = {
-            "eq": lambda: actual == expected,
-            "ne": lambda: actual != expected,
-            "gte": lambda: actual is not None and actual >= expected,
-            "lte": lambda: actual is not None and actual <= expected,
-            "in": lambda: actual in expected,
-            "contains": lambda: expected in actual,
-        }[constraint.operator]()
+        try:
+            if constraint.operator == "eq":
+                passed = actual == expected
+            elif constraint.operator == "ne":
+                passed = actual != expected
+            elif constraint.operator == "gte":
+                passed = actual is not None and actual >= expected
+            elif constraint.operator == "lte":
+                passed = actual is not None and actual <= expected
+            elif constraint.operator == "in":
+                passed = actual in expected
+            else:
+                passed = actual is not None and expected in actual
+        except (TypeError, ValueError):
+            passed = False
         if not passed:
             message = constraint.message or (
                 f"runtime constraint failed: {constraint.target} {constraint.operator} {expected!r}"
