@@ -124,7 +124,7 @@ class SQLiteStateStore:
         except (TypeError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"stored {field} JSON is invalid") from exc
         if not isinstance(decoded, dict):
-            raise RuntimeError(f"stored {field} must be a JSON object")
+            raise TypeError(f"stored {field} must be a JSON object")
         return decoded
 
     @staticmethod
