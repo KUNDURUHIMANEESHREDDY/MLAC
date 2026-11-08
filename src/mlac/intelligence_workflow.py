@@ -97,6 +97,15 @@ class TorchTransformerCandidateBuilder:
 
         candidate_path = output / "candidate.pt"
         torch.save(model.state_dict(), candidate_path)
+        candidate_manifest = {
+            "schema_version": 1,
+            "operation": plan.operation,
+            "parameters": dict(plan.parameters),
+        }
+        (output / "candidate_manifest.json").write_text(
+            json.dumps(candidate_manifest, sort_keys=True, separators=(",", ":"), allow_nan=False),
+            encoding="utf-8",
+        )
         return candidate_path
 
 
