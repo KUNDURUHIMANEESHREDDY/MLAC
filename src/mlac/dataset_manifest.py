@@ -23,7 +23,7 @@ def _safe_file(root: Path, relative: str) -> Path:
         raise ValueError("dataset paths must be non-empty POSIX relative paths")
     path = PurePosixPath(relative)
     if path.is_absolute() or any(part in ("", ".", "..") for part in path.parts):
-        raise ValueError("dataset path must not escape the dataset root")
+        raise ValueError("dataset path must be relative and must not escape the dataset root")
     target = root.joinpath(*path.parts)
     # Resolve and reject symlinks so the signed path cannot be redirected.
     if target.is_symlink() or not target.is_file():
