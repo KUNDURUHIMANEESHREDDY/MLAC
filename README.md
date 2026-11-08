@@ -14,7 +14,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 - Local microbenchmark and baseline-versus-candidate evaluation with task-quality and performance gates.
 - SQLite-backed append-only experiment scorecard ledger.
 - Safety kernel with policy integrity checks, monotonic tightening, and externally signed production approvals.
-- Docker-backed candidate runner with no network, read-only candidate input, isolated output, dropped capabilities, non-root identity, and resource/time limits.
+- Docker-backed candidate runner with no network, read-only candidate input, separate trusted evaluation mount, isolated output, dropped capabilities, non-root identity, and resource/time limits.
 - Controller-owned candidate pipeline: fixed trusted worker, validated report, evaluation gates, candidate-only governance, and persisted outcome.
 
 ## Quick start
@@ -29,7 +29,11 @@ Optional API: pip install -e ".[api]" then mlac serve. Keep the unauthenticated 
 
 ## Candidate evaluation workflow
 
-The included initial worker supports MLAC TransformerBlock tensor-only state dictionaries and a fixed regression metric. Build it from the repository root with `docker build -f worker/Dockerfile -t mlac-worker:local .`, resolve the resulting immutable image digest, and use that digest below. The worker evaluates baseline and candidate artifacts from the read-only bundle and writes /output/report.json using schema version 1. See worker/README.md for the manifest and tensor format.
+Build the initial worker image from the repository root:
+
+    docker build -f worker/Dockerfile -t mlac-worker:local .
+
+Resolve its immutable image digest and configure that digest in DockerSandboxRunner and CandidateEvaluationPipeline. The candidate directory contains candidate.pt only. A separate operator-managed trusted evaluation directory contains manifest.json, baseline.pt, input.pt, and target.pt. See worker/README.md for the manifest format.
 
     from mlac.pipeline import CandidateEvaluationPipeline
     from mlac.sandbox import DockerSandboxRunner
@@ -43,18 +47,19 @@ The included initial worker supports MLAC TransformerBlock tensor-only state dic
     )
     result = pipeline.run(
         candidate_dir="./candidate-bundle",
+        trusted_evaluation_dir="./operator-controlled-evaluation",
         model_id="baseline-model-id",
         candidate_id="candidate-001",
     )
     print(result.status, result.evaluation.evaluation_id)
 
-The pipeline can authorize only a candidate operation. It does not deploy or promote to production. The initial worker does not execute generated Python source; that requires a separately reviewed worker harness. See worker/README.md, docs/PHASE5.md, and docs/PHASE6.md.
+The pipeline can authorize only a candidate operation. It does not deploy or promote to production. The initial worker does not execute generated Python source; that requires a separately reviewed harness. See worker/README.md, docs/PHASE5.md, and docs/PHASE6.md.
 
 ## Safety and limitations
 
 - Production mutations are disabled by default and require external policy pinning plus scoped operator approval.
 - Evaluation evidence is not deployment authorization.
-- Candidate input is read-only; no controller, policy, recovery, credential, or home-directory mounts are provided.
+- Candidate input and trusted evaluation artifacts are mounted read-only and separately; no controller, policy, recovery, credential, or home-directory mounts are provided.
 - Worker reports are trusted only to the extent that the reviewed, digest-pinned worker image and runtime are trusted.
 - Docker is not a complete defense against a compromised host, kernel, daemon, or runtime. Use a dedicated worker VM/host and stronger isolation for hostile code.
 - The optional API is unauthenticated; keep it on localhost.

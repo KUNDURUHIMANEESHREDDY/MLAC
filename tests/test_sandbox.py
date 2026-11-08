@@ -56,3 +56,9 @@ def test_candidate_source_is_not_modified_by_runner_contract(tmp_path):
     with pytest.raises(RuntimeError):
         runner.run(candidate_dir=candidate, command=["python", "/workspace/candidate.py"])
     assert source.read_text(encoding="utf-8") == "print('candidate')"
+
+def test_candidate_and_trusted_inputs_must_be_separate(tmp_path):
+    import pytest
+    runner = DockerSandboxRunner(image=DIGEST_IMAGE)
+    with pytest.raises(ValueError, match="must be distinct"):
+        runner.run(candidate_dir=tmp_path, trusted_dir=tmp_path, command=["/worker"])

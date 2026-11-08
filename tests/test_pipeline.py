@@ -19,10 +19,20 @@ class FakeRunner:
         self.payload=payload
         self.command=None
         self.candidate_dir=None
-    def run(self,*,candidate_dir,command):
-        self.candidate_dir,self.command=candidate_dir,command
+        self.trusted_dir=None
+    def run(self,*,candidate_dir,command,trusted_dir=None):
+        self.candidate_dir,self.command,self.trusted_dir=candidate_dir,command,trusted_dir
         return SimpleNamespace(exit_code=0,timed_out=False,stderr="",
             output_files={"report.json":json.dumps(self.payload).encode()})
+
+def dirs(tmp_path):
+    candidate=tmp_path/"candidate"
+    trusted=tmp_path/"trusted"
+    candidate.mkdir()
+    trusted.mkdir()
+    (candidate/"candidate.pt").write_bytes(b"candidate checkpoint placeholder")
+    (trusted/"manifest.json").write_text("operator-controlled")
+    return candidate,trusted
 
 def test_report_is_validated_and_scored():
     result=evaluate_worker_report(report())
@@ -39,9 +49,12 @@ def test_pipeline_runs_fixed_worker_governs_and_records(tmp_path):
     runner=FakeRunner(report())
     store=ExperimentStore(tmp_path/"ledger.sqlite")
     pipe=CandidateEvaluationPipeline(runner=runner,image="worker@sha256:"+"a"*64,store=store)
-    result=pipe.run(candidate_dir=tmp_path,model_id="base",candidate_id="c1")
+    candidate,trusted=dirs(tmp_path)
+    result=pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="c1")
     assert result.status=="candidate_authorized" and result.governance_authorized
-    assert runner.command==["/opt/mlac-worker/evaluate","--input","/workspace","--report","/output/report.json"]
+    assert runner.command==["/opt/mlac-worker/evaluate","--candidate","/workspace/candidate.pt",
+        "--trusted","/trusted","--report","/output/report.json"]
+    assert runner.candidate_dir==candidate and runner.trusted_dir==trusted
     assert result.ledger_record["status"]=="eligible"
     assert store.get(result.evaluation.evaluation_id)["result"]["workflow_status"]=="candidate_authorized"
 
@@ -51,7 +64,8 @@ def test_pipeline_records_governance_denial(tmp_path):
         store=ExperimentStore(tmp_path/"ledger.sqlite"),
         evaluation_policy=EvaluationPolicy(max_parameter_growth_ratio=.25),
         governance=GovernancePolicy(max_parameter_growth_ratio=.1))
-    result=pipe.run(candidate_dir=tmp_path,model_id="base",candidate_id="large")
+    candidate,trusted=dirs(tmp_path)
+    result=pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="large")
     assert result.evaluation.passed and result.status=="governance_denied"
     assert not result.governance_authorized
     assert result.ledger_record["status"]=="governance_denied"
@@ -59,7 +73,8 @@ def test_pipeline_records_governance_denial(tmp_path):
 def test_pipeline_does_not_authorize_quality_regression(tmp_path):
     pipe=CandidateEvaluationPipeline(runner=FakeRunner(report(quality=.5)),
         image="worker@sha256:"+"a"*64,store=ExperimentStore(tmp_path/"ledger.sqlite"))
-    result=pipe.run(candidate_dir=tmp_path,model_id="base",candidate_id="bad")
+    candidate,trusted=dirs(tmp_path)
+    result=pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,model_id="base",candidate_id="bad")
     assert result.status=="evaluation_failed" and not result.governance_authorized
 
 def test_pipeline_worker_entrypoint_is_trusted_configuration(tmp_path):
@@ -71,7 +86,9 @@ def test_pipeline_allows_parameter_reduction_under_growth_budget(tmp_path):
     runner=FakeRunner(report(params=80))
     pipe=CandidateEvaluationPipeline(runner=runner,image="worker@sha256:"+"a"*64,
         store=ExperimentStore(tmp_path/"ledger.sqlite"))
-    result=pipe.run(candidate_dir=tmp_path,model_id="base",candidate_id="smaller")
+    candidate,trusted=dirs(tmp_path)
+    result=pipe.run(candidate_dir=candidate,trusted_evaluation_dir=trusted,
+        model_id="base",candidate_id="smaller")
     assert result.status=="candidate_authorized"
     assert result.evaluation.parameter_growth_ratio < 0
 

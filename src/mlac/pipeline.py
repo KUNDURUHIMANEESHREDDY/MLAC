@@ -12,7 +12,8 @@ from mlac.experiments import ExperimentStore
 from mlac.governance import GovernancePolicy
 
 class SandboxRunner(Protocol):
-    def run(self, *, candidate_dir: str | Path, command: list[str]) -> Any: ...
+    def run(self, *, candidate_dir: str | Path, command: list[str],
+            trusted_dir: str | Path | None = None) -> Any: ...
 
 @dataclass(frozen=True)
 class PipelineResult:
@@ -125,12 +126,14 @@ class CandidateEvaluationPipeline:
         self.evaluation_policy=evaluation_policy or EvaluationPolicy()
         self.worker_entrypoint,self.max_report_bytes=worker_entrypoint,max_report_bytes
 
-    def run(self, *, candidate_dir: str|Path, model_id: str, candidate_id: str,
+    def run(self, *, candidate_dir: str|Path, trusted_evaluation_dir: str|Path,
+            model_id: str, candidate_id: str,
             operation: str="register-evaluated-candidate") -> PipelineResult:
         if not model_id.strip() or not candidate_id.strip() or not operation.strip():
             raise ValueError("model_id, candidate_id and operation must be non-empty")
-        execution=self.runner.run(candidate_dir=candidate_dir,command=[
-            self.worker_entrypoint,"--input","/workspace","--report","/output/report.json"])
+        execution=self.runner.run(candidate_dir=candidate_dir,trusted_dir=trusted_evaluation_dir,command=[
+            self.worker_entrypoint,"--candidate","/workspace/candidate.pt",
+            "--trusted","/trusted","--report","/output/report.json"])
         if execution.timed_out: raise RuntimeError("Candidate worker exceeded its wall-clock limit")
         if execution.exit_code != 0:
             raise RuntimeError(f"Candidate worker failed with exit code {execution.exit_code}: {execution.stderr[:2000]}")

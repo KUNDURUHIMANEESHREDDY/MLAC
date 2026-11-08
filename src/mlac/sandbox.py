@@ -87,11 +87,19 @@ class DockerSandboxRunner:
         *,
         candidate_dir: str | os.PathLike[str],
         command: Sequence[str],
+        trusted_dir: str | os.PathLike[str] | None = None,
     ) -> SandboxResult:
-        """Execute argv in Docker; reject invalid inputs and unsafe fallback."""
+        """Execute argv in Docker; candidate and trusted evaluation inputs are separate read-only mounts."""
         source = Path(candidate_dir).expanduser().resolve(strict=True)
         if not source.is_dir():
             raise ValueError("candidate_dir must be an existing directory")
+        trusted = None
+        if trusted_dir is not None:
+            trusted = Path(trusted_dir).expanduser().resolve(strict=True)
+            if not trusted.is_dir():
+                raise ValueError("trusted_dir must be an existing directory")
+            if trusted == source:
+                raise ValueError("candidate_dir and trusted_dir must be distinct")
         if not command or any(
             not isinstance(arg, str) or not arg or "\x00" in arg for arg in command
         ):
@@ -123,6 +131,8 @@ class DockerSandboxRunner:
                 "--mount", f"type=bind,src={source},dst=/workspace,readonly",
                 "--mount", f"type=bind,src={output},dst=/output",
             ]
+            if trusted is not None:
+                argv.extend(["--mount", f"type=bind,src={trusted},dst=/trusted,readonly"])
             for key, value in sorted(self.environment.items()):
                 argv.extend(["--env", f"{key}={value}"])
             argv.extend([self.image, *command])
