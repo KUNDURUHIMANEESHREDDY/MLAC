@@ -176,10 +176,12 @@ def restore_sqlite_backup(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
                 ).fetchone()[0]
             finally:
-                if restored is not None:
-                    restored.close()
-                if source is not None:
-                    source.close()
+                try:
+                    if restored is not None:
+                        restored.close()
+                finally:
+                    if source is not None:
+                        source.close()
 
             current = target.lstat()
             if not stat.S_ISREG(current.st_mode) or _identity(current) != created_identity:
