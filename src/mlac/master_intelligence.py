@@ -338,3 +338,102 @@ class MasterIntelligenceEngine:
                 raise ValueError(f"proposal {index}: measurement_iterations must be an integer from 1 to 1000")
             params = {"warmup_iterations": warmup, "measurement_iterations": iterations}
 
+        for key in ("hypothesis", "rationale"):
+            value_text = raw.get(key)
+            if not isinstance(value_text, str) or not value_text.strip() or len(value_text) > 2000:
+                raise ValueError(f"proposal {index}: {key} must be a non-empty string of at most 2000 characters")
+        expected = raw.get("expected_effect", {})
+        criteria = raw.get("falsification_criteria", [])
+        if not isinstance(expected, Mapping) or not expected or len(expected) > 12:
+            raise ValueError(f"proposal {index}: expected_effect must be a non-empty object with at most 12 entries")
+        if any(
+            not isinstance(key, str)
+            or not key.strip()
+            or not isinstance(value, str)
+            or not value.strip()
+            or len(value) > 500
+            for key, value in expected.items()
+        ):
+            raise ValueError(f"proposal {index}: expected_effect keys and values must be bounded non-empty strings")
+        if (
+            not isinstance(criteria, list)
+            or not 1 <= len(criteria) <= 12
+            or any(not isinstance(item, str) or not item.strip() or len(item) > 500 for item in criteria)
+        ):
+            raise ValueError(f"proposal {index}: provide 1 to 12 bounded falsification criteria")
+        risk = raw.get("risk", "medium")
+        if not isinstance(risk, str) or risk not in {"low", "medium", "high"}:
+            raise ValueError(f"proposal {index}: risk must be low, medium, or high")
+        raw_value = raw.get("estimated_value", 0.5)
+        raw_feasibility = raw.get("feasibility", 0.5)
+        if isinstance(raw_value, bool) or isinstance(raw_feasibility, bool):
+            raise ValueError(f"proposal {index}: value and feasibility must be finite numbers from 0 to 1")
+        value, feasibility = float(raw_value), float(raw_feasibility)
+        if (
+            not math.isfinite(value)
+            or not math.isfinite(feasibility)
+            or not 0 <= value <= 1
+            or not 0 <= feasibility <= 1
+        ):
+            raise ValueError(f"proposal {index}: value and feasibility must be finite numbers from 0 to 1")
+        hypothesis = ExperimentHypothesis(
+            raw["hypothesis"],
+            raw["rationale"],
+            {str(key): str(value) for key, value in expected.items()},
+            tuple(criteria),
+        )
+        return ExperimentPlan(
+            str(uuid4()), objective, hypothesis, operation, dict(params),
+            self.MEASUREMENTS, risk, value, feasibility,
+        )
+
+    def plan(self, *, model_id: str, architecture: Architecture | Mapping[str, Any],
+             objective: str, constraints: Mapping[str, float] | None = None) -> IntelligenceReport:
+        if not isinstance(model_id, str) or not model_id.strip():
+            raise ValueError("model_id must be non-empty")
+        arch = self._architecture(architecture)
+        goal = self.parse_objective(objective, constraints=constraints)
+        diagnoses = self.diagnose(arch, goal)
+        raw_plans = self._rule_plans(arch, goal)
+        planner = "rules"
+        if self.backend is not None:
+            proposals = self.backend.propose(objective=asdict(goal), architecture=arch.to_dict(),
+                diagnoses=[asdict(d) for d in diagnoses],
+                constraints={"allowed_operations": sorted(self.ALLOWED_OPERATIONS),
+                             "max_parameter_growth_ratio": self.max_parameter_growth_ratio})
+            if not isinstance(proposals, list):
+                raise ValueError("reasoning backend must return a list")
+            if len(proposals) > min(100, self.max_plans * 10):
+                raise ValueError("reasoning backend returned too many proposals")
+            raw_plans.extend(proposals)
+            planner = "rules+llm"
+        plans, seen = [], set()
+        for index, raw in enumerate(raw_plans):
+            plan = self._validate_proposal(raw, goal, arch, index)
+            fingerprint = json.dumps([plan.operation, plan.parameters], sort_keys=True, default=str)
+            if fingerprint not in seen:
+                plans.append(plan)
+                seen.add(fingerprint)
+        risk_weight = {"low": 1.0, "medium": 0.85, "high": 0.6}
+        plans.sort(
+            key=lambda plan: (
+                plan.estimated_value * plan.feasibility * risk_weight[plan.risk],
+                plan.feasibility,
+                plan.estimated_value,
+            ),
+            reverse=True,
+        )
+        plans = plans[:self.max_plans]
+        recommendation = (
+            f" Top-ranked proposal: {plans[0].operation} "
+            f"(risk={plans[0].risk}, estimated utility="
+            f"{plans[0].estimated_value * plans[0].feasibility * risk_weight[plans[0].risk]:.3f})."
+            if plans else " No valid experiment proposal was produced."
+        )
+        summary = (
+            f"Analyzed {len(arch.components)} components and {len(arch.tensors)} tensors. "
+            f"Found {len(diagnoses)} diagnostic signals and ranked {len(plans)} experiment plans."
+            f"{recommendation} Plans are proposals; execution, evaluation, and authorization remain separate."
+        )
+        return IntelligenceReport(str(uuid4()), model_id, arch.name, goal,
+            tuple(diagnoses), tuple(plans), summary, planner)
