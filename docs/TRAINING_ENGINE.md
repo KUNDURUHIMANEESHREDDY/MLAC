@@ -108,6 +108,9 @@ evaluate arbitrary classification models; do not pass a generic classifier
 checkpoint to it. A model-family-specific fixed evaluator and candidate
 reconstruction contract must be registered before that family can be promoted.
 The bridge does not bypass the worker or authorize production deployment.
+The pipeline must be configured with `trusted_dataset_signers`, and the
+operator-controlled trusted evaluation directory must contain its signed
+dataset manifest.
 
 Example governed submission after training:
 
