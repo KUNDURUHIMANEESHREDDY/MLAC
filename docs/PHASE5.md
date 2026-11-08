@@ -31,6 +31,22 @@ Phase 5 introduces mlac.sandbox.DockerSandboxRunner. It runs candidate commands 
 
 The worker image must be built and scanned by a trusted release pipeline. It should contain only the runtime and explicitly approved dependencies. Candidate packages must not be installed into the controller environment.
 
+## Host-side output collection
+
+The writable /output mount is controlled by the worker process. The controller
+therefore avoids check-then-read pathname operations. It opens the output root
+once, traverses relative to pinned directory descriptors, opens children with
+O_NOFOLLOW, verifies the opened inode and file type, and enforces the aggregate
+byte limit while reading. Symlinks, special files, and entries replaced during
+an open race are skipped. A file that grows during collection cannot exceed
+the configured byte limit.
+
+The runner checks for POSIX descriptor-relative openat and O_NOFOLLOW support
+before starting Docker. On hosts without those primitives, including native
+Windows Python, it fails closed instead of using a race-prone pathname fallback.
+Use a Linux host or VM for Docker-backed candidate execution until native
+Windows reparse-point-safe collection is implemented.
+
 ## Trust boundary and limitations
 
 This is a hardened Docker invocation contract, not a complete hostile-code sandbox by itself. The host kernel, Docker daemon, container runtime, worker image, and operator-controlled daemon configuration remain trusted computing base components. Docker flags are defense-in-depth, not a proof against kernel/container escapes. A deployment must use a dedicated non-root worker host or VM, patched runtime, daemon access restricted to the MLAC sandbox service, no Docker socket mounted into workers, and external monitoring. For higher assurance, run this backend on a dedicated VM or use a stronger isolation runtime such as gVisor or Kata Containers, with network policy enforced outside the container.
