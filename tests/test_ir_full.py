@@ -87,6 +87,7 @@ def test_runtime_compatibility_checks_backend_features_dtype_and_memory():
         runtime_requirements=RuntimeRequirements(
             backend="pytorch",
             required_features=("bf16", "flash_attention"),
+            required_devices=("cuda",),
             required_dtypes=("bf16",),
             minimum_memory_bytes=4096,
             maximum_sequence_length=4096,
@@ -101,6 +102,7 @@ def test_runtime_compatibility_checks_backend_features_dtype_and_memory():
     )
     issues = validate_compatibility(architecture, runtime)
     assert any("missing features" in item for item in issues)
+    assert any("missing devices" in item for item in issues)
     assert any("does not support dtypes" in item for item in issues)
     assert any("insufficient" in item for item in issues)
     assert any("sequence length" in item for item in issues)
