@@ -209,6 +209,74 @@ def _topological_order(architecture: Architecture) -> tuple[list[GraphNode], dic
     return ordered, incoming_nodes
 
 
+
+
+def _apply_initialization(compiled: CompiledArchitecture) -> None:
+    parameters = dict(compiled.named_parameters())
+    mappings_by_tensor: dict[str, list[ParameterMapping]] = defaultdict(list)
+    for mapping in compiled.architecture.parameter_mappings:
+        mappings_by_tensor[mapping.tensor_name].append(mapping)
+
+    for strategy in compiled.architecture.initialization:
+        mappings = mappings_by_tensor.get(strategy.target, [])
+        if not mappings:
+            raise ValueError(
+                f"initialization target {strategy.target!r} has no parameter mapping"
+            )
+        for mapping in mappings:
+            key = compiled.parameter_keys.get(mapping.parameter_name)
+            if key is None or key not in parameters:
+                raise ValueError(
+                    f"initialization target {strategy.target!r} is not bound to a compiled parameter"
+                )
+            parameter = parameters[key]
+            devices = [parameter.device] if parameter.device.type == "cuda" else []
+            with torch.random.fork_rng(devices=devices):
+                if strategy.seed is not None:
+                    torch.manual_seed(strategy.seed)
+                    if devices:
+                        torch.cuda.manual_seed_all(strategy.seed)
+                config = strategy.config
+                method = strategy.method.lower()
+                with torch.no_grad():
+                    if method == "zeros":
+                        nn.init.zeros_(parameter)
+                    elif method == "ones":
+                        nn.init.ones_(parameter)
+                    elif method == "constant":
+                        nn.init.constant_(parameter, float(config.get("value", 0.0)))
+                    elif method == "normal":
+                        nn.init.normal_(
+                            parameter, mean=float(config.get("mean", 0.0)),
+                            std=float(config.get("std", 1.0)),
+                        )
+                    elif method == "uniform":
+                        nn.init.uniform_(
+                            parameter, a=float(config.get("a", 0.0)),
+                            b=float(config.get("b", 1.0)),
+                        )
+                    elif method == "xavier_uniform":
+                        nn.init.xavier_uniform_(parameter, gain=float(config.get("gain", 1.0)))
+                    elif method == "xavier_normal":
+                        nn.init.xavier_normal_(parameter, gain=float(config.get("gain", 1.0)))
+                    elif method == "kaiming_uniform":
+                        nn.init.kaiming_uniform_(
+                            parameter, a=float(config.get("a", 0.0)),
+                            mode=str(config.get("mode", "fan_in")),
+                            nonlinearity=str(config.get("nonlinearity", "leaky_relu")),
+                        )
+                    elif method == "kaiming_normal":
+                        nn.init.kaiming_normal_(
+                            parameter, a=float(config.get("a", 0.0)),
+                            mode=str(config.get("mode", "fan_in")),
+                            nonlinearity=str(config.get("nonlinearity", "leaky_relu")),
+                        )
+                    elif method == "orthogonal":
+                        nn.init.orthogonal_(parameter, gain=float(config.get("gain", 1.0)))
+                    else:
+                        raise ValueError(f"unsupported initialization method: {strategy.method!r}")
+
+
 def compile_architecture(
     architecture: Architecture,
     *,
@@ -307,7 +375,9 @@ def compile_architecture(
     if unbound:
         raise ValueError(f"IR parameters are not bound to compiled nodes: {', '.join(sorted(unbound))}")
 
-    return CompiledArchitecture(
+    compiled = CompiledArchitecture(
         architecture, compiled_nodes, modules, incoming,
         [node.node_id for node in input_nodes], output_nodes, parameter_keys,
     )
+    _apply_initialization(compiled)
+    return compiled
