@@ -99,6 +99,7 @@ def prune_attention_heads(block: TransformerBlock, heads_to_remove: Iterable[int
 
     candidate = deepcopy(block)
     new_attention = PrunableSelfAttention(old.d_model, len(retained), bias=old.qkv.bias is not None)
+    new_attention = new_attention.to(device=old.qkv.weight.device, dtype=old.qkv.weight.dtype)
     head_indices = torch.tensor(
         [h * old.head_dim + offset for h in retained for offset in range(old.head_dim)],
         dtype=torch.long, device=old.qkv.weight.device,
@@ -111,7 +112,6 @@ def prune_attention_heads(block: TransformerBlock, heads_to_remove: Iterable[int
         new_attention.out_proj.weight.copy_(old.out_proj.weight.index_select(1, head_indices))
         if old.out_proj.bias is not None:
             new_attention.out_proj.bias.copy_(old.out_proj.bias)
-    new_attention = new_attention.to(device=old.qkv.weight.device, dtype=old.qkv.weight.dtype)
     candidate.attention = new_attention
     return HeadPruningResult(candidate, old.num_heads, retained, removed,
                              _parameter_count(block), _parameter_count(candidate))
