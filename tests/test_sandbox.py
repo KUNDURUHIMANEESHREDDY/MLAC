@@ -157,3 +157,60 @@ def test_runner_checks_safe_output_support_before_starting_docker(monkeypatch, t
     runner = DockerSandboxRunner(image=DIGEST_IMAGE)
     with pytest.raises(RuntimeError, match="openat and O_NOFOLLOW"):
         runner.run(candidate_dir=tmp_path, command=["/worker"])
+
+
+def test_output_collection_skips_symlink_replaced_after_stat(monkeypatch, tmp_path):
+    import mlac.sandbox as sandbox
+
+    output = tmp_path / "output"
+    output.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("host-secret", encoding="utf-8")
+    target = output / "report.json"
+    target.write_text('{"safe":true}', encoding="utf-8")
+
+    original_stat = sandbox.os.stat
+    replaced = False
+
+    def stat_then_replace(path, *args, **kwargs):
+        nonlocal replaced
+        result = original_stat(path, *args, **kwargs)
+        if path == "report.json" and kwargs.get("dir_fd") is not None and not replaced:
+            target.unlink()
+            target.symlink_to(outside)
+            replaced = True
+        return result
+
+    supported = set(sandbox.os.supports_dir_fd)
+    supported.add(stat_then_replace)
+    monkeypatch.setattr(sandbox.os, "supports_dir_fd", supported)
+    monkeypatch.setattr(sandbox.os, "stat", stat_then_replace)
+
+    assert sandbox._read_output_files(output, 1024) == {}
+    assert replaced
+
+
+def test_output_collection_enforces_limit_when_file_grows_during_read(monkeypatch, tmp_path):
+    import mlac.sandbox as sandbox
+
+    output = tmp_path / "output"
+    output.mkdir()
+    growing = output / "report.json"
+    growing.write_bytes(b"12")
+
+    original_read = sandbox.os.read
+    grew = False
+
+    def grow_before_read(fd, size):
+        nonlocal grew
+        if not grew:
+            with growing.open("ab") as stream:
+                stream.write(b"3456")
+            grew = True
+        return original_read(fd, size)
+
+    monkeypatch.setattr(sandbox.os, "read", grow_before_read)
+
+    with pytest.raises(RuntimeError, match="output_bytes limit"):
+        sandbox._read_output_files(output, 4)
+    assert grew
