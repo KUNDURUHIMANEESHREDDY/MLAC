@@ -36,6 +36,32 @@ def make_dataset(seed=11):
         SignedDatasetBinding(root,envelope,{"toy-training-signer":public}))
 
 
+def attach_signed_manifest(dataset):
+    import tempfile
+    from pathlib import Path
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from mlac.dataset_manifest import create_signed_dataset_manifest
+    from mlac.training_engine import SignedDatasetBinding
+
+    root = Path(tempfile.mkdtemp(prefix="mlac-sequence-dataset-"))
+    for name, content in (("train.jsonl", "train"), ("validation.jsonl", "validation"), ("test.jsonl", "heldout")):
+        (root / name).write_text(content, encoding="utf-8")
+    key = Ed25519PrivateKey.generate()
+    private = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    public = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+    envelope = create_signed_dataset_manifest(
+        root, dataset_id="sequence-data", revision=dataset.revision,
+        splits={"train": ["train.jsonl"], "validation": ["validation.jsonl"], "test": ["test.jsonl"]},
+        signer_id="sequence-signer", private_key_pem=private,
+        dataset_fingerprint=dataset.digest,
+    )
+    return TrainingDataset(
+        dataset.train, dataset.validation, dataset.heldout, dataset.revision,
+        SignedDatasetBinding(root, envelope, {"sequence-signer": public}),
+    )
+
+
 def make_model():
     torch.manual_seed(2)
     return nn.Sequential(nn.Linear(2, 8), nn.Tanh(), nn.Linear(8, 2))
@@ -108,7 +134,7 @@ def test_sequence_logits_support_token_distillation_and_lora_training():
         labels = torch.roll(tokens, shifts=-1, dims=1)
         labels[:, -1] = -100  # standard ignored padding/target position
         splits.append(TensorSplit(tokens, labels, tuple(f"{prefix}-{i}" for i in range(count))))
-    dataset = TrainingDataset(*splits, revision="token-sequence-v1")
+    dataset = attach_signed_manifest(TrainingDataset(*splits, revision="token-sequence-v1"))
     teacher = TinyLanguageModel().eval()
     config = TrainingConfig(epochs=2, batch_size=4, scheduler="none", seed=29)
 
