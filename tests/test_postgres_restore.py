@@ -155,6 +155,7 @@ def test_postgres_backup_restores_into_empty_disposable_database(
         ):
             # verify_backup uses pg_restore --list for archive inspection; capture
             # only the separate invocation that executes the restore transaction.
+            assert kwargs.get("shell", False) is False
             restore_commands.append(command)
         return real_run(*args, **kwargs)
 
