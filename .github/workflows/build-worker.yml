@@ -84,7 +84,7 @@ jobs:
           # Create a tiny deterministic GPT-2 fixture and local WordLevel tokenizer.
           # This is a worker/signature integration test, not a substitute for the
           # operator's real model checkpoints or trusted evaluation corpus.
-          docker run --rm --network none --read-only --cap-drop=ALL \
+          docker run --rm -i --network none --read-only --cap-drop=ALL \
             --security-opt=no-new-privileges --pids-limit=128 --memory=2g --cpus=2 \
             --user 65532:65532 --tmpfs /tmp:rw,nosuid,nodev,size=256m \
             -e HOME=/tmp -v "$ROOT/candidate:/workspace" \
@@ -161,7 +161,7 @@ jobs:
           )
           PY
 
-          docker run --rm --network none --read-only --cap-drop=ALL \
+          docker run --rm -i --network none --read-only --cap-drop=ALL \
             --security-opt=no-new-privileges --pids-limit=128 --memory=2g --cpus=2 \
             --user 65532:65532 --tmpfs /tmp:rw,nosuid,nodev,size=128m \
             -e HOME=/tmp -v "$ROOT/candidate:/workspace:ro" \
@@ -174,7 +174,7 @@ jobs:
 
           # Verify the Ed25519 signature, report digest, exact input digests,
           # worker identity, and immutable image reference independently.
-          docker run --rm --network none --read-only --cap-drop=ALL \
+          docker run --rm -i --network none --read-only --cap-drop=ALL \
             --security-opt=no-new-privileges --pids-limit=64 --memory=1g --cpus=1 \
             --user 65532:65532 --tmpfs /tmp:rw,nosuid,nodev,size=64m \
             -e HOME=/tmp -v "$ROOT/candidate:/workspace:ro" \
