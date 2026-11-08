@@ -120,7 +120,8 @@ jobs:
 
           config = GPT2Config(
               vocab_size=len(vocab), n_positions=32, n_ctx=32, n_embd=16,
-              n_layer=1, n_head=2, tie_word_embeddings=False,\n              bos_token_id=1, eos_token_id=2, pad_token_id=0,
+              n_layer=1, n_head=2, tie_word_embeddings=False,
+              bos_token_id=1, eos_token_id=2, pad_token_id=0,
           )
           baseline = GPT2LMHeadModel(config).eval()
           Path("/tmp/base").mkdir()
