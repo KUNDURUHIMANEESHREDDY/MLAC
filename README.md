@@ -22,7 +22,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 - Optional S3 Object Lock COMPLIANCE artifact backend with versioned, content-addressed uploads.
 - Independent runtime-identity verifier for authority-signed SPIFFE/image/measurement statements, with durable nonce replay protection.
 - Evaluation-pipeline hooks for mandatory runtime evidence and remote artifact archival.
-- Optional API authentication with externally issued OIDC JWTs, JWKS signature verification, issuer/audience validation, and issuer/subject-scoped model and proposal access; bounded request bodies and pre-/post-authentication rate limits keep the API loopback-only until durable multi-tenant storage and deployment acceptance are complete.
+- Optional API authentication with externally issued OIDC JWTs, JWKS signature verification, issuer/audience validation, and issuer/subject-scoped model and proposal access; bounded request bodies, persistent SQLite metadata, and optional shared Redis rate limits. The supported production-candidate topology places the API behind Caddy TLS and does not publish the API or Redis ports.
 
 ## Quick start
 
@@ -110,12 +110,12 @@ The pipeline can authorize only a candidate operation. It does not deploy or pro
 - Candidate input and trusted evaluation artifacts are mounted read-only and separately; no controller, policy, recovery, credential, or home-directory mounts are provided.
 - Worker reports are trusted only to the extent that the reviewed, digest-pinned worker image and runtime are trusted.
 - Docker is not a complete defense against a compromised host, kernel, daemon, or runtime. Use a dedicated worker VM/host and stronger isolation for hostile code.
-- The optional API requires OIDC JWT authentication and issuer/subject ownership checks for every non-health route. Request bodies are capped at 1 MiB; pre-authentication requests are limited per peer before JWKS resolution, and authenticated principals have a separate process-local limit. The CLI disables proxy-header trust and rejects non-loopback binds.
-- When `MLAC_API_STATE_DB` is configured, model/proposal metadata use a versioned SQLite schema, parameterized statements, owner-indexed reads, foreign-key cascades, WAL journaling, and full synchronous commits. The default remains process-local. API rate limiters remain process-local and do not coordinate across workers; each has a bounded identity table and fails closed rather than evicting an active principal. SQLite backup/restore is an operator responsibility. The API remains loopback-only until distributed rate limiting, independent TLS gateway controls, backup/restore drills, and deployed acceptance are complete.
+- The optional API requires OIDC JWT authentication and issuer/subject ownership checks for every non-health route. Request bodies are capped at 1 MiB. If MLAC_RATE_LIMIT_REDIS_URL is configured, pre-authentication peer and authenticated-principal limits are enforced atomically in shared Redis; otherwise the bounded in-process limiter is for localhost development only. The CLI disables proxy-header trust and rejects non-loopback binds. The Docker deployment trusts forwarded headers only from its pinned Caddy container address.
+- When `MLAC_API_STATE_DB` is configured, model/proposal metadata use a versioned SQLite schema, parameterized statements, owner-indexed reads, foreign-key cascades, WAL journaling, and full synchronous commits. The default remains process-local. Shared Redis rate limiting is enabled by MLAC_RATE_LIMIT_REDIS_URL and fails closed if Redis is unavailable; without Redis, the bounded in-process limiter is suitable only for localhost development. The API CLI remains loopback-only; the container entrypoint is reachable only through the pinned Caddy network. SQLite backup/restore is an operator responsibility.
 - Trusted authorization, recovery, governance, and deployment trust roots are not self-modifying.
 - Host-side sandbox output collection uses descriptor-relative no-follow traversal and fails closed without POSIX openat/O_NOFOLLOW support; native Windows candidate evaluation is not yet supported.
 
-See docs/ARCHITECTURE.md, docs/API_STATE.md, and docs/PHASE4.md through docs/PHASE7.md.
+See docs/ARCHITECTURE.md, docs/API_STATE.md, docs/PRODUCTION_DEPLOYMENT.md, and docs/PHASE4.md through docs/PHASE7.md.
 
 ## Roadmap
 
