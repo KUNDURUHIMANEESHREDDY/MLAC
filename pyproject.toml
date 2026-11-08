@@ -20,6 +20,8 @@ remote-storage = ["boto3>=1.34"]
 mlac = "mlac.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/mlac"]
+[tool.hatch.build.targets.wheel.force-include]
+"schemas/mlac-ir-v1.schema.json" = "mlac/schemas/mlac-ir-v1.schema.json"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
