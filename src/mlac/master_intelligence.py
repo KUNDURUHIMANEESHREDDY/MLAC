@@ -101,7 +101,7 @@ class CallableReasoningBackend:
 class MasterIntelligenceEngine:
     """Turns model goals into ranked, constrained, auditable experiment proposals."""
 
-    ALLOWED_OPERATIONS = {"profile_model", "prune_attention_heads", "reduce_dropout"}
+    ALLOWED_OPERATIONS = {"profile_model", "prune_attention_heads"}
     MEASUREMENTS = ("task_quality", "latency", "parameter_count", "peak_memory", "finite_outputs")
 
     def __init__(self, *, backend: ReasoningBackend | None = None,

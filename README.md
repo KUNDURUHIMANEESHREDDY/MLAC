@@ -7,7 +7,7 @@ MLAC is an open-source research and engineering platform for inspecting machine-
 ## Implemented
 
 - Framework-neutral architecture, component, and tensor representation.
-- Master Intelligence Engine: objective normalization, architecture diagnosis, hypothesis generation, ranked experiment plans, and a validated optional LLM-provider interface.
+- Master Intelligence Engine with an OpenAI Responses API provider (schema-constrained proposals), plus a governed plan-to-candidate evaluation workflow for the supported TransformerBlock.
 - In-memory model registry and read-only inspector for trusted, instantiated PyTorch modules.
 - Versioned dropout-configuration mutation on IR snapshots.
 - Proposal-only evolution controller and default-deny production mutation policy.
@@ -44,7 +44,9 @@ The proposal-only planning engine works without a model-provider API:
     )
     print(report.to_dict())
 
-Optional API endpoint: `POST /intelligence/plan` with `model_id`, `architecture`, `objective`, and optional `constraints`. See `docs/MASTER_INTELLIGENCE.md` for the provider interface and safety boundaries. LLM suggestions are untrusted and validated against an operation allowlist; plans never execute or authorize themselves.
+Configure `MLAC_OPENAI_API_KEY` (or `OPENAI_API_KEY`) and optionally `MLAC_OPENAI_MODEL` (default `gpt-6-astra`) to activate live OpenAI reasoning. `GET /intelligence/provider` reports provider configuration; `POST /intelligence/plan` accepts `model_id`, `architecture`, `objective`, and optional `constraints`. Without a key, the planner safely falls back to deterministic rules.
+
+To execute proposals through the existing candidate pipeline, construct `IntelligenceExperimentWorkflow` with an initialized `CandidateEvaluationPipeline` and call `run(..., trusted_evaluation_dir=...)`. The initial trusted candidate builder supports only the worker's `TransformerBlock`: baseline profiling and attention-head pruning. It loads operator-controlled tensor state dictionaries, writes a candidate checkpoint, and sends it through the digest-pinned worker, signed-report verification, evaluation gates, candidate governance, artifact registry, and ledger. See `docs/MASTER_INTELLIGENCE.md` for setup and limits. The LLM never executes code, controls the worker, or authorizes a candidate.
 
 ## Candidate evaluation workflow
 

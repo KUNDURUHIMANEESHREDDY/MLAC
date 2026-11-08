@@ -52,17 +52,17 @@ def test_llm_backend_suggestions_are_allowlist_validated():
 
 def test_llm_backend_can_add_validated_plan():
     def provider(**kwargs):
-        return [{"operation": "reduce_dropout",
-                 "parameters": {"module_name": "encoder.dropout", "p": 0.0},
-                 "hypothesis": "Remove dropout for inference",
-                 "rationale": "Dropout is inactive in eval mode.",
-                 "expected_effect": {"latency": "small_or_none"},
+        return [{"operation": "prune_attention_heads",
+                 "parameters": {"module_name": "encoder.attn", "heads_to_prune": [0]},
+                 "hypothesis": "Prune a different attention head",
+                 "rationale": "The provider identified a distinct head ablation to evaluate.",
+                 "expected_effect": {"latency": "decrease_expected"},
                  "falsification_criteria": ["No measured latency improvement"],
                  "risk": "low", "estimated_value": 0.3, "feasibility": 0.9}]
     report = MasterIntelligenceEngine(backend=CallableReasoningBackend(provider)).plan(
         model_id="m", architecture=sample_architecture(), objective="reduce latency")
     assert report.planner == "rules+llm"
-    assert "reduce_dropout" in {p.operation for p in report.plans}
+    assert any(p.operation == "prune_attention_heads" and p.parameters["heads_to_prune"] == [0] for p in report.plans)
 
 
 def test_rejects_invalid_pruning_indices_from_backend():

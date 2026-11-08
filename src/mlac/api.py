@@ -4,16 +4,19 @@ from typing import Any
 from mlac.evolution import EvolutionController
 from mlac.ir import Architecture
 from mlac.master_intelligence import MasterIntelligenceEngine
+from mlac.openai_backend import OpenAIProviderError, OpenAIResponsesBackend
 from mlac.registry import ModelRegistry
+
 registry=ModelRegistry()
 evolution=EvolutionController()
-intelligence=MasterIntelligenceEngine()
+intelligence=MasterIntelligenceEngine(backend=OpenAIResponsesBackend.from_env())
+
 def create_app() -> Any:
     try:
         from fastapi import FastAPI,HTTPException
     except ImportError as exc:
         raise RuntimeError("Install API dependencies: pip install 'mlac[api]'") from exc
-    app=FastAPI(title="MLAC",version="0.7.0")
+    app=FastAPI(title="MLAC",version="0.8.0")
     @app.get("/health")
     def health(): return {"status":"ok","service":"mlac"}
     @app.post("/models")
@@ -40,6 +43,11 @@ def create_app() -> Any:
             return asdict(proposal)
         except KeyError as exc: raise HTTPException(status_code=404,detail=str(exc)) from exc
         except (ValueError,PermissionError) as exc: raise HTTPException(status_code=422,detail=str(exc)) from exc
+    @app.get("/intelligence/provider")
+    def intelligence_provider():
+        backend=intelligence.backend
+        return {"provider":"openai" if backend is not None else "rules-only",
+                "model":getattr(backend,"model_name",None)}
     @app.post("/intelligence/plan")
     def intelligence_plan(payload:dict[str,Any]):
         try:
@@ -48,9 +56,12 @@ def create_app() -> Any:
                 objective=str(payload.get("objective","")),
                 constraints=payload.get("constraints"))
             return report.to_dict()
+        except OpenAIProviderError as exc:
+            raise HTTPException(status_code=503,detail=str(exc)) from exc
         except (KeyError,TypeError,ValueError) as exc:
             raise HTTPException(status_code=422,detail=str(exc)) from exc
     @app.get("/proposals")
     def list_proposals(): return evolution.list_proposals()
     return app
+
 app=create_app()
