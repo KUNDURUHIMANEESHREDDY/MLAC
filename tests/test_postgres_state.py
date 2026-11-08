@@ -107,6 +107,7 @@ def test_sqlite_migration_copies_models_and_proposals_transactionally(tmp_path):
 
 
 def test_postgres_json_object_rejects_non_object_json() -> None:
+    """Reject valid JSON values that do not decode to an object."""
     with pytest.raises(TypeError, match="must be a JSON object"):
         PostgresStateStore._json_object("[]", field="model metadata")
 
