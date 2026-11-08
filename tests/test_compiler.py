@@ -99,3 +99,53 @@ def test_compiler_rejects_cycles_and_unknown_operators():
     )
     with pytest.raises(ValueError, match="unregistered"):
         compile_architecture(unknown)
+
+
+
+def test_compiler_executes_declared_initialization_strategy():
+    architecture = Architecture(
+        name="initialized",
+        family="mlp",
+        graph_nodes=(
+            GraphNode("input", "input"),
+            GraphNode("projection", "linear", attributes={
+                "in_features": 3, "out_features": 2,
+                "parameter_bindings": {"weight": "proj.weight", "bias": "proj.bias"},
+            }),
+        ),
+        graph_edges=(GraphEdge("input", "projection"),),
+        tensors=(
+            TensorSpec("proj.weight", (2, 3), "fp32"),
+            TensorSpec("proj.bias", (2,), "fp32"),
+        ),
+        parameter_mappings=(
+            ParameterMapping("proj.weight", "proj.weight", shape=(2, 3)),
+            ParameterMapping("proj.bias", "proj.bias", shape=(2,)),
+        ),
+        initialization=(
+            __import__("mlac.ir", fromlist=["InitializationStrategy"]).InitializationStrategy(
+                "proj.weight", "zeros"
+            ),
+            __import__("mlac.ir", fromlist=["InitializationStrategy"]).InitializationStrategy(
+                "proj.bias", "constant", {"value": 0.25}
+            ),
+        ),
+    )
+    model = compile_architecture(architecture)
+    assert torch.count_nonzero(model.nodes[0].weight) == 0
+    assert torch.allclose(model.nodes[0].bias, torch.full((2,), 0.25))
+
+
+def test_compiler_rejects_unbound_ir_parameters():
+    architecture = Architecture(
+        name="unbound", family="mlp",
+        graph_nodes=(
+            GraphNode("input", "input"),
+            GraphNode("projection", "linear", attributes={"in_features": 2, "out_features": 2}),
+        ),
+        graph_edges=(GraphEdge("input", "projection"),),
+        tensors=(TensorSpec("weight", (2, 2)),),
+        parameter_mappings=(ParameterMapping("weight", "weight"),),
+    )
+    with pytest.raises(ValueError, match="not bound"):
+        compile_architecture(architecture)
