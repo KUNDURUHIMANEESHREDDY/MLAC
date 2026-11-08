@@ -1,8 +1,11 @@
 """Regression tests for MLAC's exact-commit image publication gate."""
 
+from pathlib import Path
+
 from scripts.verify_publish_checks import REQUIRED_CHECKS, evaluate_check_runs
 
 EXPECTED_SHA = "a" * 40
+WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "publish-image.yml"
 
 
 def check(name: str, *, status: str = "completed", conclusion: str | None = "success",
@@ -69,3 +72,17 @@ def test_latest_rerun_controls_the_required_check_result() -> None:
 def test_invalid_check_runs_payload_fails_closed() -> None:
     """Malformed API responses are failures, not empty successful results."""
     assert evaluate_check_runs([], EXPECTED_SHA)[0] == "failure"
+
+
+def test_publisher_serializes_main_and_skips_superseded_main_tags() -> None:
+    """Older completed workflow runs cannot move the mutable main tag backwards."""
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "group: mlac-container-main" in source
+    assert "cancel-in-progress: false" in source
+    assert "commits/main" in source
+    assert 'current_sha == "$EXPECTED_SHA"' in source
+    assert 'if [[ "$IS_MAIN_TIP" == "true" ]]' in source
+    assert '${IMAGE_NAME}:sha-${EXPECTED_SHA}' in source
+    assert "tags: ${{ steps.tags.outputs.tags }}" in source
+    assert "mlac-container-${{ github.event.workflow_run.head_sha }}" not in source
