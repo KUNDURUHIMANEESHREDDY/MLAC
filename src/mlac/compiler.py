@@ -187,7 +187,12 @@ class CompiledArchitecture(nn.Module):
                     f"checkpoint tensor {source_key!r} shape {tuple(source.shape)} "
                     f"does not match {target_key!r} shape {tuple(target.shape)}"
                 )
-            if mapping.shape and tuple(source.shape) != tuple(mapping.shape):
+            if mapping.shape and (
+                len(mapping.shape) != source.ndim or any(
+                    isinstance(expected, int) and actual != expected
+                    for actual, expected in zip(source.shape, mapping.shape)
+                )
+            ):
                 raise ValueError(f"checkpoint tensor {source_key!r} violates its IR shape contract")
             pending.append((target_key, source))
             loaded.append(source_key)
