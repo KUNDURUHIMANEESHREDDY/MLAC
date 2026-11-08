@@ -231,16 +231,16 @@ credentials automatically.
 
 ## Current verified image
 
-The worker release containing the architecture Modification Engine completed its Docker build, signed language-model worker smoke test, and signed structural-modification candidate smoke test (GitHub Actions run 42467975080). The structural smoke test reconstructed a resized-MLP candidate and verified its signed report and input digests. Pin this exact immutable image reference:
+The worker release containing the Weight Engine integration completed its Docker build, signed language-model worker smoke test, signed structural-modification candidate smoke test, and signed fake-INT8 weight-candidate smoke test (GitHub Actions run 42472696680). The weight smoke test independently reconstructed the fake-quantized candidate from the trusted baseline and verified the signed report and input digests. Pin this exact immutable image reference:
 
-    ghcr.io/kunduruhimaneeshreddy/mlac-worker@sha256:ebbc69c999cd618e5ec4884369563c44eb146a1a60587f3694ac85e0fbff14d7
+    ghcr.io/kunduruhimaneeshreddy/mlac-worker@sha256:2d0bce4d0bbddda9d1bb883911a7f6959f57bca70feb60139d9918a528d2dad9
 
 Controller configuration should use the same digest for both the runner image
 and the worker's `--worker-image` attestation argument. For example:
 
     worker_image_digest = (
         "ghcr.io/kunduruhimaneeshreddy/mlac-worker@sha256:"
-        "ebbc69c999cd618e5ec4884369563c44eb146a1a60587f3694ac85e0fbff14d7"
+        "2d0bce4d0bbddda9d1bb883911a7f6959f57bca70feb60139d9918a528d2dad9"
     )
     pipeline = CandidateEvaluationPipeline(
         runner=runner,
