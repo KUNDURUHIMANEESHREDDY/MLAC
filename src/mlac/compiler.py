@@ -403,16 +403,50 @@ def compile_architecture(
         raise ValueError("compiled architecture has no graph outputs")
 
     parameter_keys: dict[str, str] = {}
+    mapping_by_name = {
+        mapping.parameter_name: mapping for mapping in architecture.parameter_mappings
+    }
+    tensor_specs = {item.name: item for item in architecture.tensors}
     for node in compiled_nodes:
         bindings = node.attributes.get("parameter_bindings", {})
         if not isinstance(bindings, dict):
             raise TypeError(f"node {node.node_id!r} parameter_bindings must be a mapping")
+        local_parameters = dict(modules[module_index[node.node_id]].named_parameters())
         for local_name, parameter_name in bindings.items():
             if not isinstance(local_name, str) or not isinstance(parameter_name, str):
                 raise TypeError("parameter bindings must map strings to strings")
+            if local_name not in local_parameters:
+                raise ValueError(
+                    f"node {node.node_id!r} binds unknown module parameter {local_name!r}"
+                )
             if parameter_name in parameter_keys:
                 raise ValueError(f"duplicate parameter binding: {parameter_name!r}")
+            mapping = mapping_by_name.get(parameter_name)
+            if mapping is None:
+                raise ValueError(f"parameter binding {parameter_name!r} has no IR mapping")
+            parameter = local_parameters[local_name]
+            spec = tensor_specs.get(mapping.tensor_name)
+            if spec is not None:
+                if len(spec.shape) != parameter.ndim or any(
+                    isinstance(expected, int) and actual != expected
+                    for actual, expected in zip(parameter.shape, spec.shape)
+                ):
+                    raise ValueError(
+                        f"compiled parameter {parameter_name!r} shape {tuple(parameter.shape)} "
+                        f"does not match tensor contract {spec.shape}"
+                    )
+            if mapping.shape and tuple(mapping.shape) != tuple(parameter.shape):
+                raise ValueError(
+                    f"compiled parameter {parameter_name!r} shape {tuple(parameter.shape)} "
+                    f"does not match mapping shape {mapping.shape}"
+                )
             parameter_keys[parameter_name] = f"nodes.{module_index[node.node_id]}.{local_name}"
+        unbound_local = set(local_parameters) - set(bindings)
+        if unbound_local:
+            raise ValueError(
+                f"node {node.node_id!r} has module parameters without IR bindings: "
+                f"{', '.join(sorted(unbound_local))}"
+            )
 
     declared = {mapping.parameter_name for mapping in architecture.parameter_mappings}
     dangling = set(parameter_keys) - declared if declared else set()
