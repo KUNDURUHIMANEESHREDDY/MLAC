@@ -62,17 +62,17 @@ The library workflow connects a Master Intelligence plan to the existing control
         max_experiments=2,
     )
 
-The operator-controlled trusted evaluation directory must follow worker/README.md: manifest.json, baseline.pt, input.pt, and target.pt. The manifest describes the supported TransformerBlock and the baseline state-dict filename. The candidate builder loads the baseline with weights_only=True, verifies it is a tensor state_dict, applies the supported weight-preserving attention-head pruning transform (or copies weights for a profile-only control), and writes candidate.pt. It does not execute generated code.
+The operator-controlled trusted evaluation directory must follow worker/README.md: manifest.json, baseline.pt, input.pt, and target.pt. The manifest describes the supported TransformerBlock and the baseline state-dict filename. The candidate builder loads the baseline with weights_only=True, verifies it is a tensor state_dict, applies the allow-listed Modification Engine operation (or copies weights for a profile-only control), and writes candidate.pt plus candidate_manifest.json. The fixed worker independently validates the manifest, reconstructs the candidate from the trusted baseline, and strictly loads the candidate state_dict. It does not execute generated code.
 
 The workflow caps experiments at GovernancePolicy.max_candidates_per_run. Each candidate is evaluated separately. A passing evaluation can authorize only the candidate operation under the existing governance policy; this is not production deployment or promotion. Inspect each PipelineResult and the persisted evaluation ledger.
 
 ## Supported scope and limitations
 
-- OpenAI proposals are restricted to profile_model and prune_attention_heads.
-- The initial trusted builder supports only the worker's top-level TransformerBlock attention module named attention.
+- OpenAI proposals are restricted to profile_model, prune_attention_heads, resize_attention_heads, resize_mlp_hidden, set_mlp_activation, and convert_mlp_to_moe. The local validator enforces operation-specific parameter bounds and inspected attention/MLP evidence.
+- The trusted builder supports the reviewed TransformerBlock target: attention pruning/resizing, MLP hidden-width/activation changes, and MLP-to-MoE conversion. Layer-stack insertion/removal remains available through the local Modification Engine API but is not yet exposed through this single-block worker manifest.
 - Profile-only candidates are unchanged baseline checkpoints and serve as a control.
 - This worker's quality metric is negative MSE on operator-controlled tensors, not language-model perplexity or general reasoning quality.
-- Multi-layer arbitrary graphs, MoE, KV cache, quantization, training, distillation, and generated-source execution are not implemented by this integration.
+- Arbitrary multi-layer graph rewriting, positional-encoding surgery, KV cache, quantization, training, distillation, distributed experts, and generated-source execution are not implemented by this integration.
 - Provider output is never trusted for execution. The local engine validates operation names, inspected component identity, head indices, required rationale, risk and scoring fields.
 - The workflow does not modify governance policy, worker identity, signing keys, trusted manifests, baseline checkpoints, or production models.
 
