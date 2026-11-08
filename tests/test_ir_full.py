@@ -142,6 +142,17 @@ def test_public_package_exposes_ir_graph_types_and_lazy_adapters():
     assert callable(apply_weight_transformations)
 
 
+def test_machine_readable_ir_schema_is_published():
+    import json
+    from pathlib import Path
+
+    schema_path = Path(__file__).parents[1] / "schemas" / "mlac-ir-v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    assert schema["$schema"].endswith("2020-12/schema")
+    assert schema["$defs"]["architecture"]["properties"]["schema_version"]["const"] == 1
+    assert "runtimeCapabilities" in schema["$defs"]
+
+
 def test_ir_rejects_cycles_and_invalid_runtime_capabilities():
     import pytest
 
