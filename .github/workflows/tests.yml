@@ -44,9 +44,22 @@ jobs:
         with:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
-      - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y postgresql-client-16
-      - run: echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
-      - run: pg_dump --version && pg_restore --version
+      - name: Install PostgreSQL 16 client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ca-certificates curl gnupg
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSLo /tmp/pgdg.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          fingerprint="$(gpg --show-keys --with-colons /tmp/pgdg.asc | awk -F: '$1 == "fpr" { print $10; exit }')"
+          test "$fingerprint" = "B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8"
+          sudo install -m 0644 /tmp/pgdg.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+          pg_dump --version
+          pg_restore --version
       - run: pip install -e ".[dev,torch,api,production]"
       - run: python -m ruff check src/mlac/api.py src/mlac/cli.py src/mlac/training_engine.py src/mlac/pipeline.py src/mlac/dataset_manifest.py src/mlac/self_evolution.py src/mlac/evolution.py src/mlac/registry.py src/mlac/sqlite_state.py src/mlac/rate_limit.py src/mlac/postgres_state.py scripts/backup_state.py scripts/restore_postgres_backup.py scripts/migrate_sqlite_to_postgres.py tests/test_api.py tests/test_rate_limit.py tests/test_state_store.py tests/test_postgres_state.py tests/test_postgres_restore.py
       - run: pytest
