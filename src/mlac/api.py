@@ -24,6 +24,7 @@ from mlac.evolution import EvolutionController
 from mlac.ir import Architecture
 from mlac.master_intelligence import MasterIntelligenceEngine
 from mlac.openai_backend import OpenAIProviderError, OpenAIResponsesBackend
+from mlac.postgres_state import PostgresStateStore
 from mlac.rate_limit import RateLimiterUnavailable, RedisRateLimiter
 from mlac.registry import ModelRegistry
 from mlac.sqlite_state import SQLiteStateStore
@@ -250,7 +251,7 @@ def create_app(
     model_registry: ModelRegistry | None = None,
     evolution_controller: EvolutionController | None = None,
     intelligence_engine: MasterIntelligenceEngine | None = None,
-    state_store: SQLiteStateStore | None = None,
+    state_store: Any | None = None,
     jwks_client: Any | None = None,
     jwks_url: str | None = None,
     issuer: str | None = None,
@@ -276,8 +277,13 @@ def create_app(
         raise ValueError("state_store cannot be combined with injected registry/controller instances")
 
     if state_store is None and model_registry is None and evolution_controller is None:
+        database_url = os.getenv("MLAC_API_DATABASE_URL")
         database_path = os.getenv("MLAC_API_STATE_DB")
-        if database_path:
+        if database_url and database_path:
+            raise RuntimeError("Configure only one of MLAC_API_DATABASE_URL or MLAC_API_STATE_DB")
+        if database_url:
+            state_store = PostgresStateStore(database_url)
+        elif database_path:
             state_store = SQLiteStateStore(database_path)
 
     model_store = (
@@ -324,7 +330,11 @@ def create_app(
     app.add_middleware(RequestBodyLimitMiddleware, max_bytes=max_body_bytes)
     app.add_middleware(PreAuthenticationRateLimitMiddleware, rate_limiter=peer_rate_limiter)
     app.state.auth_configured = auth_configured
-    app.state.storage_mode = "sqlite" if state_store is not None else "process-local"
+    app.state.storage_mode = (
+        "postgres"
+        if isinstance(state_store, PostgresStateStore)
+        else "sqlite" if state_store is not None else "process-local"
+    )
 
     def require_principal(credentials=Depends(bearer)) -> str:
         """Verify a bearer JWT and return its issuer/subject-scoped principal."""
@@ -385,7 +395,7 @@ def create_app(
         if state_store is not None:
             try:
                 state_store.health_check()
-            except (OSError, SQLiteError, RuntimeError) as exc:
+            except Exception as exc:
                 raise HTTPException(status_code=503, detail="Configured state store is unavailable") from exc
         if isinstance(principal_rate_limiter, RedisRateLimiter):
             try:
