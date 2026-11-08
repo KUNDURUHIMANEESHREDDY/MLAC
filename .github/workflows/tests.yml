@@ -25,7 +25,7 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev,torch,api,production]"
-      - run: python -m ruff check src/mlac/api.py src/mlac/cli.py src/mlac/training_engine.py src/mlac/pipeline.py src/mlac/dataset_manifest.py src/mlac/self_evolution.py src/mlac/rate_limit.py tests/test_api.py tests/test_rate_limit.py tests/test_state_store.py
+      - run: python -m ruff check src/mlac/api.py src/mlac/cli.py src/mlac/training_engine.py src/mlac/pipeline.py src/mlac/dataset_manifest.py src/mlac/self_evolution.py src/mlac/evolution.py src/mlac/registry.py src/mlac/sqlite_state.py src/mlac/rate_limit.py scripts/backup_state.py tests/test_api.py tests/test_rate_limit.py tests/test_state_store.py
       - run: pytest
       - run: docker build --pull -t mlac:ci .
       - run: python -m pip install build
