@@ -163,17 +163,22 @@ def test_restore_syncs_file_and_parent_directory(
     destination = tmp_path / "isolated" / "restored.sqlite3"
     destination.parent.mkdir(mode=0o700)
     real_fsync = os.fsync
-    synced_modes: list[int] = []
+    synced_stats: list[os.stat_result] = []
 
     def record_fsync(descriptor: int) -> None:
-        synced_modes.append(os.fstat(descriptor).st_mode)
+        synced_stats.append(os.fstat(descriptor))
         real_fsync(descriptor)
 
     monkeypatch.setattr("scripts.restore_backup.os.fsync", record_fsync)
 
     restore_sqlite_backup(backup, destination, digest)
 
-    assert len(synced_modes) == 3
-    assert stat.S_ISREG(synced_modes[0])  # stable source snapshot
-    assert stat.S_ISREG(synced_modes[1])  # restored destination file
-    assert stat.S_ISDIR(synced_modes[2])  # durable destination directory entry
+    assert len(synced_stats) == 3
+    assert stat.S_ISREG(synced_stats[0].st_mode)  # stable source snapshot
+    assert stat.S_ISREG(synced_stats[1].st_mode)  # restored destination file
+    assert stat.S_ISDIR(synced_stats[2].st_mode)
+    parent_info = destination.parent.stat()
+    assert (synced_stats[2].st_dev, synced_stats[2].st_ino) == (
+        parent_info.st_dev,
+        parent_info.st_ino,
+    )
