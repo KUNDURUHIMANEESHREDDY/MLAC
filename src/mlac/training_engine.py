@@ -91,7 +91,7 @@ class TrainingDataset:
                 value = tensor.detach().cpu().contiguous()
                 digest.update(str(value.dtype).encode("ascii"))
                 digest.update(str(tuple(value.shape)).encode("ascii"))
-                digest.update(value.view(torch.uint8).numpy().tobytes())
+                digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
         return digest.hexdigest()
 
 
@@ -297,7 +297,7 @@ class TrainingEngine:
 
         steps_per_epoch = math.ceil(dataset.train.inputs.shape[0] / config.batch_size)
         if config.scheduler == "cosine":
-            scheduler = lambda optimizer: torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, total_steps))
+            scheduler = lambda optimizer: torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
         elif config.scheduler == "step":
             scheduler = lambda optimizer: torch.optim.lr_scheduler.StepLR(optimizer, step_size=config.step_size, gamma=config.scheduler_gamma)
         else:
