@@ -1,5 +1,5 @@
 """Master LLM Architecture Controller."""
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 from mlac.ir import (
     IR_SCHEMA_VERSION, Architecture, CompatibilityConstraint, Component, GraphEdge as IRGraphEdge,
     GraphNode as IRGraphNode, InitializationStrategy, ParameterMapping,
@@ -11,6 +11,7 @@ from mlac.designer import ArchitectureDesigner, DesignCandidate, DesignConstrain
 from mlac.master_intelligence import MasterIntelligenceEngine, IntelligenceReport, OptimizationObjective
 from mlac.openai_backend import OpenAIResponsesBackend, OpenAIProviderError
 from mlac.intelligence_workflow import IntelligenceExperimentWorkflow, IntelligenceWorkflowResult, TorchTransformerCandidateBuilder
+from mlac.self_evolution import ControllerEvolutionLedger, ControllerEvolutionResult, ControllerSelfEvolutionWorkflow
 from mlac.inspector import (
     ArchitectureInspection, AttentionAnalysis, GraphEdge, GraphNode,
     KVCacheEstimate, MemoryProfile, estimate_kv_cache_bytes,
@@ -55,7 +56,8 @@ __all__ = [
     "validate_compatibility", "ModelRegistry", "ModelRecord",
     "MasterIntelligenceEngine", "IntelligenceReport", "OptimizationObjective",
     "OpenAIResponsesBackend", "OpenAIProviderError", "IntelligenceExperimentWorkflow",
-    "IntelligenceWorkflowResult", "TorchTransformerCandidateBuilder", "__version__",
+    "IntelligenceWorkflowResult", "TorchTransformerCandidateBuilder",
+    "ControllerEvolutionLedger", "ControllerEvolutionResult", "ControllerSelfEvolutionWorkflow", "__version__",
     "ArchitectureInspection", "AttentionAnalysis", "KVCacheEstimate", "MemoryProfile", "estimate_kv_cache_bytes",
     "inspect_torch_model", "inspect_torch_model_full",
 ]
