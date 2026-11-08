@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import time
 from types import SimpleNamespace
 
@@ -225,6 +226,20 @@ def test_cli_allows_only_loopback_bind_hosts():
     assert is_loopback_host("localhost")
     assert not is_loopback_host("0.0.0.0")
     assert not is_loopback_host("192.0.2.10")
+
+
+def test_cli_disables_proxy_header_trust(monkeypatch):
+    """Prevent client-supplied forwarding headers from changing the peer identity."""
+    from mlac import cli
+
+    calls = {}
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=lambda *args, **kwargs: calls.update(kwargs)))
+    monkeypatch.setattr(sys, "argv", ["mlac", "serve"])
+
+    cli.main()
+
+    assert calls["host"] == "127.0.0.1"
+    assert calls["proxy_headers"] is False
 
 
 def test_intelligence_planning_route_requires_identity_and_returns_proposals():

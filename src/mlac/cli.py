@@ -14,6 +14,7 @@ def is_loopback_host(host: str) -> bool:
 
 
 def main():
+    """Parse CLI commands and start the API with proxy-header trust disabled."""
     parser = argparse.ArgumentParser(prog="mlac")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("version")
@@ -35,7 +36,13 @@ def main():
             import uvicorn
         except ImportError as exc:
             raise SystemExit("Install API dependencies: pip install 'mlac[api]'") from exc
-        uvicorn.run("mlac.api:app", host=args.host, port=args.port, reload=False)
+        uvicorn.run(
+            "mlac.api:app",
+            host=args.host,
+            port=args.port,
+            reload=False,
+            proxy_headers=False,
+        )
 
 
 if __name__ == "__main__":
