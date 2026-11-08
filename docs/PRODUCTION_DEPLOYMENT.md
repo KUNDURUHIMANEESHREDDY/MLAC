@@ -23,7 +23,7 @@ This runbook deploys the OIDC-authenticated API as a single API instance behind 
 - A tested backup bucket with S3 versioning and Object Lock COMPLIANCE enabled.
 - A workload/instance IAM role for the backup process with narrowly scoped S3 permissions; avoid long-lived AWS access keys in .env.
 
-The main-branch workflow publishes immutable image tags to ghcr.io/kunduruhimanesheddy/mlac, including sha-<commit>. Pin MLAC_IMAGE to the exact commit that passed CI; do not deploy the mutable main tag. The default Docker subnet is 172.30.0.0/24. Change the subnet and the pinned proxy IP together in docker-compose.yml, Dockerfile, and this runbook if it conflicts with the host network.
+The main-branch workflow publishes immutable image tags to ghcr.io/kunduruhimaneeshreddy/mlac, including sha-<commit>. Pin MLAC_IMAGE to the exact commit that passed CI; do not deploy the mutable main tag. The default Docker subnet is 172.30.0.0/24. Change the subnet and the pinned proxy IP together in docker-compose.yml, Dockerfile, and this runbook if it conflicts with the host network.
 
 ## Configure and start
 
