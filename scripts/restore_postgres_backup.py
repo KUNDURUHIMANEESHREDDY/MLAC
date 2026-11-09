@@ -13,6 +13,7 @@ import ipaddress
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ class PostgresTarget:
     """Validated connection settings for an explicitly disposable database."""
 
     host: str
+    hostaddr: str
     port: int
     username: str
     password: str
@@ -44,6 +46,9 @@ class PostgresTarget:
         """Return explicit libpq keyword arguments without exposing a DSN."""
         return {
             "host": self.host,
+            "hostaddr": self.hostaddr,
+            "service": "",
+            "options": "",
             "port": self.port,
             "user": self.username,
             "password": self.password,
@@ -74,6 +79,7 @@ class PostgresTarget:
         environment.update(
             {
                 "PGHOST": self.host,
+                "PGHOSTADDR": self.hostaddr,
                 "PGPORT": str(self.port),
                 "PGUSER": self.username,
                 "PGPASSWORD": self.password,
@@ -84,6 +90,33 @@ class PostgresTarget:
             }
         )
         return environment
+
+
+def _resolve_host_address(host: str, port: int) -> str:
+    """Resolve the target hostname once so inspection and restore use one server."""
+    try:
+        return ipaddress.ip_address(host).compressed
+    except ValueError:
+        pass
+
+    try:
+        results = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError("restore target host could not be resolved") from exc
+
+    addresses = set()
+    for _family, _socktype, _protocol, _canonical_name, sockaddr in results:
+        try:
+            addresses.add(ipaddress.ip_address(sockaddr[0]))
+        except ValueError:
+            continue
+    if not addresses:
+        raise ValueError("restore target host did not resolve to an IP address")
+
+    # Prefer IPv4 for deterministic compatibility with local CI services, then
+    # choose a stable address. The same selected address is pinned into libpq
+    # kwargs and the pg_restore environment; DNS is not re-resolved per step.
+    return min(addresses, key=lambda address: (address.version != 4, int(address))).compressed
 
 
 def parse_postgres_target(database_url: str) -> PostgresTarget:
@@ -129,9 +162,11 @@ def parse_postgres_target(database_url: str) -> PostgresTarget:
         raise ValueError("restore target port or connect_timeout is invalid") from exc
     if not 1 <= port <= 65535 or not 1 <= connect_timeout <= 30:
         raise ValueError("restore target port or connect_timeout is outside its allowed range")
+    hostaddr = _resolve_host_address(parsed.hostname, port)
 
     return PostgresTarget(
         host=parsed.hostname,
+        hostaddr=hostaddr,
         port=port,
         username=unquote(parsed.username),
         password=unquote(parsed.password),
