@@ -40,12 +40,36 @@ with sqlite3.connect(path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True)
 PY
 ```
 
-## PostgreSQL restore boundary
+## PostgreSQL restore drill
 
-The current utility intentionally does not automate PostgreSQL restoration. A custom-format archive is verified with `pg_restore --list`, but restoring it requires a separately provisioned disposable PostgreSQL instance/database, reviewed ownership/extension requirements, and explicit operator-controlled credentials. Do not point a restore command at the production DSN.
+Provision a **new, empty disposable PostgreSQL database** on a test instance. The database name must begin with `mlac_restore_drill_`; the restore utility does not create or drop databases. Keep the source archive immutable and obtain its expected SHA-256 from trusted object metadata.
 
-A complete PostgreSQL drill must record the disposable server version, restore command and exit status, schema/table counts, application-level read checks, and measured recovery time. Keep the source backup immutable.
+Read the disposable target DSN without echoing it or placing it in shell history. Do not enable shell tracing (set -x) while handling the credential:
+
+```bash
+read -r -s -p "Disposable PostgreSQL DSN: " MLAC_RESTORE_DATABASE_URL
+printf '\n'
+export MLAC_RESTORE_DATABASE_URL
+python -m scripts.restore_postgres_backup \
+  ./downloaded/api-state.dump \
+  --sha256 '<trusted-64-character-sha256>'
+unset MLAC_RESTORE_DATABASE_URL
+```
+
+For a local-only test service, `sslmode=disable` is accepted only for `localhost` or a loopback IP. Remote targets must use `sslmode=verify-full`; `require` and `verify-ca` are rejected because they do not verify the server hostname. The utility:
+
+1. Verifies the archive SHA-256 and PostgreSQL custom-format table of contents before connecting.
+2. Requires the dedicated `mlac_restore_drill_*` database-name prefix.
+3. Rejects any target containing user schemas, relations, functions, or types.
+4. Runs `pg_restore --exit-on-error --no-owner --no-acl --single-transaction`; it never passes `--clean` or `--create`.
+5. Reports only the target database name, trusted digest and restored table count. Restore output is suppressed to avoid logging database contents.
+
+A restore failure rolls back the restore transaction. The utility does not drop the database or attempt an automatic cleanup. Inspect and remove a disposable database only through the operator's separately approved database lifecycle procedure.
+
+The CI integration test uses its ephemeral PostgreSQL 16 service to create a source database, dump one table, restore it into a fresh drill database, and read the restored row. A second test proves that a non-empty target is refused and its existing row remains unchanged.
+
+A complete deployment-specific drill must additionally record the disposable server version, extension/ownership requirements, application-level read checks, measured recovery time and observed RPO/RTO. Never use the production DSN.
 
 ## What this proves—and does not prove
 
-A successful SQLite drill proves that one downloaded backup passed its trusted SHA-256 check, was restored into a new local file, and passed SQLite structural integrity. It does not prove S3 Object Lock enforcement, independent administration, encryption-key recovery, PostgreSQL restore, API startup, or application-level recovery. Production RPO/RTO remains unverified until the operator runs and records the full deployment-specific drill.
+A successful SQLite drill proves that one downloaded backup passed its trusted SHA-256 check, was restored into a new local file, and passed SQLite structural integrity. A successful CI PostgreSQL drill proves that a trusted custom archive can be restored transactionally into an empty disposable PostgreSQL 16 database and that an existing non-empty target is not modified. Neither proves production S3 Object Lock enforcement, independent administration, encryption-key recovery, production-cluster compatibility, API startup, or application-level recovery. Production RPO/RTO remains unverified until the operator runs and records the full deployment-specific drill.
