@@ -139,15 +139,15 @@ def postgres_archive_and_target(tmp_path: Path):
                 cleanup.close()
 
 
-def test_restore_target_pins_one_server_address_and_ignores_libpq_overrides(
+def test_restore_target_pins_one_server_address_for_both_clients(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Pin the same resolved endpoint for psycopg inspection and pg_restore."""
-    monkeypatch.setenv("PGHOSTADDR", "203.0.113.77")
-    monkeypatch.setenv("PGOPTIONS", "-c search_path=attacker")
-    monkeypatch.setenv("PGSERVICE", "attacker")
+    """Pin one resolved IP for psycopg inspection and pg_restore execution."""
+    for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGOPTIONS"):
+        monkeypatch.delenv(name, raising=False)
 
     def resolve_target(host: str, port: int, **kwargs):
+        """Return a deterministic test address without making a network request."""
         assert host == "db.example.com"
         assert port == 5432
         assert kwargs.get("type") == socket.SOCK_STREAM
@@ -165,12 +165,28 @@ def test_restore_target_pins_one_server_address_and_ignores_libpq_overrides(
     connection = target.connection_kwargs()
     environment = target.environment()
     assert connection["hostaddr"] == target.hostaddr
-    assert connection["service"] == ""
     assert connection["options"] == ""
+    assert "service" not in connection
     assert environment["PGHOSTADDR"] == target.hostaddr
     assert environment["PGHOST"] == target.host
-    assert "PGSERVICE" not in environment
-    assert "PGOPTIONS" not in environment
+
+
+@pytest.mark.parametrize(
+    "name",
+    ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGOPTIONS", "pghostaddr"),
+)
+def test_restore_target_rejects_libpq_environment_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    """Fail closed rather than let ambient libpq settings redirect inspection."""
+    target = parse_postgres_target(
+        "postgresql://mlac:secret@127.0.0.1:5432/"
+        "mlac_restore_drill_environment?sslmode=disable"
+    )
+    monkeypatch.setenv(name, "attacker-controlled-override")
+    with pytest.raises(ValueError, match="libpq environment overrides to be unset"):
+        target.connection_kwargs()
 
 
 def test_postgres_backup_restores_into_empty_disposable_database(
