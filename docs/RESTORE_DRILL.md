@@ -56,7 +56,7 @@ python -m scripts.restore_postgres_backup \
 unset MLAC_RESTORE_DATABASE_URL
 ```
 
-For a local-only test service, `sslmode=disable` is accepted only for `localhost` or a loopback IP. Remote targets must use TLS. The utility:
+For a local-only test service, `sslmode=disable` is accepted only for `localhost` or a loopback IP. Remote targets must use `sslmode=verify-full`; `require` and `verify-ca` are rejected because they do not verify the server hostname. The utility:
 
 1. Verifies the archive SHA-256 and PostgreSQL custom-format table of contents before connecting.
 2. Requires the dedicated `mlac_restore_drill_*` database-name prefix.

@@ -160,8 +160,10 @@ def parse_postgres_target(database_url: str) -> PostgresTarget:
         loopback = ipaddress.ip_address(parsed.hostname).is_loopback
     except ValueError:
         loopback = parsed.hostname.casefold() == "localhost"
-    if sslmode in {"disable", "allow", "prefer"} and not loopback:
-        raise ValueError("remote restore targets must require TLS")
+    if not loopback and sslmode != "verify-full":
+        raise ValueError(
+            "remote restore targets must use sslmode=verify-full to verify the TLS certificate and hostname"
+        )
 
     try:
         port = parsed.port or 5432

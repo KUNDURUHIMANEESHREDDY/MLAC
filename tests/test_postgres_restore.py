@@ -30,7 +30,7 @@ def test_restore_target_requires_dedicated_database_name() -> None:
 
 def test_restore_target_requires_tls_for_remote_hosts() -> None:
     """Require TLS whenever the restore target is not loopback."""
-    with pytest.raises(ValueError, match="remote restore targets must require TLS"):
+    with pytest.raises(ValueError, match="sslmode=verify-full"):
         parse_postgres_target(
             "postgresql://mlac:secret@db.example.com:5432/"
             "mlac_restore_drill_remote?sslmode=disable"
@@ -44,6 +44,35 @@ def test_restore_target_rejects_unreviewed_libpq_options() -> None:
             "postgresql://mlac:secret@localhost:5432/"
             "mlac_restore_drill_local?sslmode=disable&options=-c%20search_path%3Dpublic"
         )
+
+
+@pytest.mark.parametrize("sslmode", ("require", "verify-ca"))
+def test_remote_restore_requires_hostname_verification(sslmode: str) -> None:
+    """Reject encrypted remote connections that do not verify the server name."""
+    with pytest.raises(ValueError, match="sslmode=verify-full"):
+        parse_postgres_target(
+            "postgresql://mlac:secret@db.example.com:5432/"
+            f"mlac_restore_drill_remote?sslmode={sslmode}"
+        )
+
+
+def test_remote_restore_accepts_verify_full(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Accept remote targets only when TLS verifies both CA and hostname."""
+    def resolve_target(host: str, port: int, **kwargs):
+        assert host == "db.example.com"
+        assert port == 5432
+        assert kwargs.get("type") == socket.SOCK_STREAM
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("203.0.113.10", port))
+        ]
+
+    monkeypatch.setattr(restore_module.socket, "getaddrinfo", resolve_target)
+    target = parse_postgres_target(
+        "postgresql://mlac:secret@db.example.com:5432/"
+        "mlac_restore_drill_remote?sslmode=verify-full"
+    )
+    assert target.sslmode == "verify-full"
+    assert target.hostaddr == "203.0.113.10"
 
 
 def _database_url(base_url: str, database: str) -> str:
