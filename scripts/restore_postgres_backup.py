@@ -2,7 +2,7 @@
 
 The command never creates or drops a database and never uses pg_restore's
 --clean or --create options. It requires an explicitly named disposable target,
-checks that the target contains no user objects, and runs the restore in one
+checks that the target contains no user objects or large objects, and runs the restore in one
 transaction so a failed restore cannot leave a partially populated database.
 """
 
@@ -142,7 +142,7 @@ def parse_postgres_target(database_url: str) -> PostgresTarget:
 
 
 def _target_is_empty(target: PostgresTarget) -> bool:
-    """Refuse any target containing user schemas, relations, functions, or types."""
+    """Refuse targets containing user objects or large objects."""
     try:
         import psycopg
     except ImportError as exc:
@@ -183,6 +183,10 @@ def _target_is_empty(target: PostgresTarget) -> bool:
                         SELECT 1
                         FROM pg_catalog.pg_namespace
                         WHERE nspname !~ '^pg_' AND nspname NOT IN ('information_schema', 'public')
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM pg_catalog.pg_largeobject_metadata
                     )
                 """
             )
