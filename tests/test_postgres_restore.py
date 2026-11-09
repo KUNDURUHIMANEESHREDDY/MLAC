@@ -201,6 +201,7 @@ def test_postgres_backup_restores_into_empty_disposable_database(
     restore_commands: list[list[str]] = []
 
     def capture_restore_command(*args, **kwargs):
+        """Capture only the actual restore invocation for argv assertions."""
         command = args[0]
         if (
             isinstance(command, list)
@@ -336,6 +337,7 @@ def test_postgres_restore_uses_the_exact_verified_snapshot(
         expected_sha256: str,
         backup_format: str = "auto",
     ):
+        """Verify the private snapshot before mutating the caller's source path."""
         snapshot = Path(snapshot_path)
         assert snapshot != backup
         result = real_verify(
