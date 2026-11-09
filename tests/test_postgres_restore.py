@@ -187,7 +187,7 @@ def test_restore_target_pins_one_server_address_for_both_clients(
     monkeypatch.setattr(restore_module.socket, "getaddrinfo", resolve_target)
     target = parse_postgres_target(
         "postgresql://mlac:secret@db.example.com:5432/"
-        "mlac_restore_drill_pinned?sslmode=require"
+        "mlac_restore_drill_pinned?sslmode=verify-full"
     )
 
     assert target.hostaddr == "192.0.2.10"
