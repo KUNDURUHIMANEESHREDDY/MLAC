@@ -224,6 +224,38 @@ def test_postgres_restore_refuses_nonempty_target_without_changing_it(
         connection.close()
 
 
+def test_postgres_restore_refuses_target_with_large_objects_without_changing_it(
+    postgres_archive_and_target,
+) -> None:
+    backup, digest, target_url, _target_name = postgres_archive_and_target
+    psycopg = pytest.importorskip("psycopg")
+    target = parse_postgres_target(target_url)
+
+    connection = psycopg.connect(**target.connection_kwargs())
+    try:
+        with connection, connection.cursor() as cursor:
+            cursor.execute("SELECT lo_create(0)")
+            row = cursor.fetchone()
+            assert row is not None
+            large_object_oid = row[0]
+    finally:
+        connection.close()
+
+    with pytest.raises(ValueError, match="target is not empty"):
+        restore_postgres_backup(backup, target_url, digest)
+
+    connection = psycopg.connect(**target.connection_kwargs())
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_largeobject_metadata WHERE oid = %s)",
+                (large_object_oid,),
+            )
+            assert cursor.fetchone() == (True,)
+    finally:
+        connection.close()
+
+
 def test_postgres_restore_rejects_digest_mismatch_before_connecting(
     postgres_archive_and_target,
 ) -> None:
