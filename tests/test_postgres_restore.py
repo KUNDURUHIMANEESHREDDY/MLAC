@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import socket
 import subprocess
 import uuid
 from pathlib import Path
@@ -20,6 +21,7 @@ from scripts.restore_postgres_backup import (
 
 
 def test_restore_target_requires_dedicated_database_name() -> None:
+    """Reject production database names before opening a connection."""
     with pytest.raises(ValueError, match="mlac_restore_drill_"):
         parse_postgres_target(
             "postgresql://mlac:secret@localhost:5432/production?sslmode=disable"
@@ -27,6 +29,7 @@ def test_restore_target_requires_dedicated_database_name() -> None:
 
 
 def test_restore_target_requires_tls_for_remote_hosts() -> None:
+    """Require TLS whenever the restore target is not loopback."""
     with pytest.raises(ValueError, match="remote restore targets must require TLS"):
         parse_postgres_target(
             "postgresql://mlac:secret@db.example.com:5432/"
@@ -35,6 +38,7 @@ def test_restore_target_requires_tls_for_remote_hosts() -> None:
 
 
 def test_restore_target_rejects_unreviewed_libpq_options() -> None:
+    """Reject connection options that could redirect or alter the restore."""
     with pytest.raises(ValueError, match="only one sslmode and one connect_timeout"):
         parse_postgres_target(
             "postgresql://mlac:secret@localhost:5432/"
@@ -135,10 +139,45 @@ def postgres_archive_and_target(tmp_path: Path):
                 cleanup.close()
 
 
+def test_restore_target_pins_one_server_address_and_ignores_libpq_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin the same resolved endpoint for psycopg inspection and pg_restore."""
+    monkeypatch.setenv("PGHOSTADDR", "203.0.113.77")
+    monkeypatch.setenv("PGOPTIONS", "-c search_path=attacker")
+    monkeypatch.setenv("PGSERVICE", "attacker")
+
+    def resolve_target(host: str, port: int, **kwargs):
+        assert host == "db.example.com"
+        assert port == 5432
+        assert kwargs.get("type") == socket.SOCK_STREAM
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.0.2.10", port))
+        ]
+
+    monkeypatch.setattr(restore_module.socket, "getaddrinfo", resolve_target)
+    target = parse_postgres_target(
+        "postgresql://mlac:secret@db.example.com:5432/"
+        "mlac_restore_drill_pinned?sslmode=require"
+    )
+
+    assert target.hostaddr == "192.0.2.10"
+    connection = target.connection_kwargs()
+    environment = target.environment()
+    assert connection["hostaddr"] == target.hostaddr
+    assert connection["service"] == ""
+    assert connection["options"] == ""
+    assert environment["PGHOSTADDR"] == target.hostaddr
+    assert environment["PGHOST"] == target.host
+    assert "PGSERVICE" not in environment
+    assert "PGOPTIONS" not in environment
+
+
 def test_postgres_backup_restores_into_empty_disposable_database(
     postgres_archive_and_target,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Restore a verified archive and assert its data and safe invocation."""
     backup, digest, target_url, target_name = postgres_archive_and_target
     psycopg = pytest.importorskip("psycopg")
     target = parse_postgres_target(target_url)
@@ -174,6 +213,7 @@ def test_postgres_backup_restores_into_empty_disposable_database(
         "--no-password",
         "--dbname",
     }
+    assert fixed_flags <= set(restore_command[1:-1])
     connection_args = [arg for arg in restore_command[1:-1] if arg not in fixed_flags]
     # The target database is the only non-flag argument before the archive path.
     # Credentials must remain in the sanitized PG* environment, never argv.
@@ -197,6 +237,7 @@ def test_postgres_backup_restores_into_empty_disposable_database(
 def test_postgres_restore_refuses_nonempty_target_without_changing_it(
     postgres_archive_and_target,
 ) -> None:
+    """Refuse a populated target and preserve its existing row."""
     backup, digest, target_url, _target_name = postgres_archive_and_target
     psycopg = pytest.importorskip("psycopg")
     target = parse_postgres_target(target_url)
@@ -227,6 +268,7 @@ def test_postgres_restore_refuses_nonempty_target_without_changing_it(
 def test_postgres_restore_refuses_target_with_large_objects_without_changing_it(
     postgres_archive_and_target,
 ) -> None:
+    """Refuse a target containing only a PostgreSQL large object."""
     backup, digest, target_url, _target_name = postgres_archive_and_target
     psycopg = pytest.importorskip("psycopg")
     target = parse_postgres_target(target_url)
@@ -259,6 +301,7 @@ def test_postgres_restore_refuses_target_with_large_objects_without_changing_it(
 def test_postgres_restore_rejects_digest_mismatch_before_connecting(
     postgres_archive_and_target,
 ) -> None:
+    """Reject a backup whose bytes do not match trusted metadata."""
     backup, _digest, target_url, _target_name = postgres_archive_and_target
     with pytest.raises(ValueError, match="SHA-256"):
         restore_postgres_backup(backup, target_url, "0" * 64)
@@ -268,6 +311,7 @@ def test_postgres_restore_uses_the_exact_verified_snapshot(
     postgres_archive_and_target,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Restore the private verified snapshot despite source-path mutation."""
     backup, digest, target_url, target_name = postgres_archive_and_target
     real_verify = restore_module.verify_backup
 
