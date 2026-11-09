@@ -27,6 +27,7 @@ from scripts.verify_backup import verify_backup
 _DATABASE_NAME = re.compile(r"^mlac_restore_drill_[a-z0-9_]{1,44}$")
 _SSL_MODES = {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
 _ALLOWED_QUERY_KEYS = {"sslmode", "connect_timeout"}
+_UNSAFE_LIBPQ_ENV = frozenset({"PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGOPTIONS"})
 
 
 @dataclass(frozen=True)
@@ -44,10 +45,17 @@ class PostgresTarget:
 
     def connection_kwargs(self) -> dict[str, object]:
         """Return explicit libpq keyword arguments without exposing a DSN."""
+        overrides = sorted(
+            {name.upper() for name in os.environ if name.upper() in _UNSAFE_LIBPQ_ENV}
+        )
+        if overrides:
+            raise ValueError(
+                "restore target requires libpq environment overrides to be unset: "
+                + ", ".join(overrides)
+            )
         return {
             "host": self.host,
             "hostaddr": self.hostaddr,
-            "service": "",
             "options": "",
             "port": self.port,
             "user": self.username,
